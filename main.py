@@ -7,12 +7,14 @@ dt = 0.01
 dx = 0.1
 dtdx = dt / dx
 H = np.empty([N + 2])
-H_N1 = np.empty([N + 2])
 U = np.zeros([N + 2])
+v_damping = 0.99
+dry_threshold = 0.01
 
 # Initial condition
-Z = 0.5 - np.asarray(np.linspace(0, 0.5, N + 2))
-H[N // 3: N // 3 * 2] = 0.5
+Z = 5 - np.asarray(np.linspace(0, 5, N + 2))
+# Z = np.zeros([N + 2])
+H[N // 3: N // 3 * 2] = 5
 
 # Reporting
 x_axis = np.asarray(range(N)) * dx
@@ -21,31 +23,57 @@ fig, (ax1, ax2) = plt.subplots(2, 1)
 H_Diff = 0
 report_interval = 10
 
-for step in range(0, 1000):
+def F_U(u, h, z):
+    return u * u / 2 + g * (h + z)
+
+for step in range(0, 2000):
     # Boundary
     H[0] = H[1]
     H[N + 1] = H[N]
+    U *= v_damping
     U[0] = -U[1]
     U[N + 1] = -U[N]
 
-    im_depth = 0.01
-    H_NonDry = H + im_depth
+    Hj = H[1: -1]
+    H_Plus = H[2:]
+    H_Minus = H[:-2]
+    Uj = U[1: -1]
+    U_Plus = U[2:]
+    U_Minus = U[:-2]
+    Zj = Z[1: -1]
+    Z_Plus = Z[2:]
+    Z_Minus = Z[:-2]
 
-    # Eq 1
-    H_N1[1: -1] = H_NonDry[1: -1] - dtdx / 2 \
-                  * (H_NonDry[1: -1] * (U[2:] - U[: -2]) + U[1: -1] * (H_NonDry[2:] - H_NonDry[: -2]))
+    # Lax-Wendroff two step
+    H_Plus2 = (Hj + H_Plus) / 2 - dtdx / 2 * (H_Plus * U_Plus - Hj * Uj)
+    H_Minus2 = (H_Minus + Hj) / 2 - dtdx / 2 * (Hj * Uj - H_Minus * U_Minus)
+    U_Plus2 = (Uj + U_Plus) / 2 - dtdx / 2 * (F_U(U_Plus, H_Plus, Z_Plus) - F_U(Uj, Hj, Zj))
+    U_Minus2 = (U_Minus + Uj) / 2 - dtdx / 2 * (F_U(Uj, Hj, Zj) - F_U(U_Minus, H_Minus, Z_Minus))
+    Z_Plus2 = (Zj + Z_Plus) / 2
+    Z_Minus2 = (Z_Minus + Zj) / 2
 
-    # Eq 2
-    U[1: -1] = \
-        (U[: -2] + U[2:]) / 2 \
-        - U[1: -1] / H_NonDry[1: -1] * (H_N1[1: -1] - H_NonDry[1: -1]) \
-        - U[1: -1] * dtdx * (U[2:] - U[: -2]) \
-        - dtdx / 2 * (U[1: -1] * U[1: -1] / H_NonDry[1: -1] + g) * (H_NonDry[2:] - H_NonDry[: -2]) \
-        - dtdx / 2 * g * (Z[2:] - Z[: -2])
+    H_New = Hj - dtdx * (H_Plus2 * U_Plus2 - H_Minus2 * U_Minus2)
+    U_New = Uj - dtdx * (F_U(U_Plus2, H_Plus2, Z_Plus2) - F_U(U_Minus2, H_Minus2, Z_Minus2))
+    Flow = U_New * H_New * dtdx
+    Flow = (Flow[1:] + Flow[:-1]) / 2
+    Flow = np.concatenate([[0], Flow, [0]])
 
-    H_Dry = np.maximum(H_N1[1: -1] - im_depth, 0)
-    H_Diff += np.sum(np.abs(H_Dry - H[1:-1]))
-    H[1: -1] = H_Dry
+    # Preserve Volume (prevent negative H)
+    Decrease = Flow[1:] - Flow[:-1]
+    Decrease_Mul = np.minimum(H[1: -1] / np.maximum(Decrease, 1e-3), 1)
+    Decrease_Mul[np.where(Decrease <= 0)] = 1
+    Flow_Mul = np.minimum(np.concatenate([[0], Decrease_Mul]), np.concatenate([Decrease_Mul, [0]]))
+    Flow = Flow * Flow_Mul
+    Decrease_Adj = Flow[1:] - Flow[:-1]
+
+    H_N1 = H[1:-1] - Decrease_Adj
+    H_N1 = np.maximum(H_N1, 0)
+    H_N1[np.where(H_N1 < dry_threshold)] = 0
+
+    # Apply change
+    H_Diff += np.sum(np.abs(H_N1 - H[1:-1]))
+    H[1:-1] = H_N1
+    U[1:-1] = U_New
     U[np.where(H == 0)] = 0
 
     if step % report_interval == 0:
@@ -55,7 +83,7 @@ for step in range(0, 1000):
         fig.suptitle(title)
 
         ax1.clear()
-        ax1.set_ylim(0, 1)
+        ax1.set_ylim(0, 5)
         ax1.bar(x_axis, Z[1: -1] + H[1: -1], width=dx, color=(0, 0.4, 1, 0.4))
         ax1.bar(x_axis, Z[1: -1], width=dx, color=(0.6, 0.4, 0, 1))
 
