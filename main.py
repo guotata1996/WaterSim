@@ -2,38 +2,32 @@ import numpy as np
 import matplotlib.pyplot as plt
 
 g = 10
-N = 20
-dt = 0.01
+N = 50
+baseline_dt = 0.005  # For large max depth, use smaller value
 dx = 0.1
-dtdx = dt / dx
-H = np.empty([N + 2])
-U = np.zeros([N + 2])
 v_damping = 0.99
 dry_threshold = 0.01
 
 # Initial condition
-Z = 5 - np.asarray(np.linspace(0, 5, N + 2))
-# Z = np.zeros([N + 2])
-H[N // 3: N // 3 * 2] = 5
+H = np.zeros([N + 2])
+U = np.zeros([N + 2])
+Z = np.zeros([N + 2])
+Z[N // 4: N // 2] = np.linspace(0, 15, len(Z[N // 4: N // 2]))
+Z[N // 2: N * 3 // 4] = np.linspace(15, 0, len(Z[N // 2: N * 3 // 4]))
+H[:N // 4] = 40
 
 # Reporting
-x_axis = np.asarray(range(N)) * dx
-fig, (ax1, ax2) = plt.subplots(2, 1)
+report_interval = 10
+manual_stepping = False
 
 H_Diff = 0
-report_interval = 10
+x_axis = np.asarray(range(N)) * dx
+fig, (ax1, ax2) = plt.subplots(2, 1)
 
 def F_U(u, h, z):
     return u * u / 2 + g * (h + z)
 
-for step in range(0, 2000):
-    # Boundary
-    H[0] = H[1]
-    H[N + 1] = H[N]
-    U *= v_damping
-    U[0] = -U[1]
-    U[N + 1] = -U[N]
-
+def Lax_Wendroff(H, U, Z, dt):
     Hj = H[1: -1]
     H_Plus = H[2:]
     H_Minus = H[:-2]
@@ -44,7 +38,7 @@ for step in range(0, 2000):
     Z_Plus = Z[2:]
     Z_Minus = Z[:-2]
 
-    # Lax-Wendroff two step
+    dtdx = dt / dx
     H_Plus2 = (Hj + H_Plus) / 2 - dtdx / 2 * (H_Plus * U_Plus - Hj * Uj)
     H_Minus2 = (H_Minus + Hj) / 2 - dtdx / 2 * (Hj * Uj - H_Minus * U_Minus)
     U_Plus2 = (Uj + U_Plus) / 2 - dtdx / 2 * (F_U(U_Plus, H_Plus, Z_Plus) - F_U(Uj, Hj, Zj))
@@ -54,11 +48,33 @@ for step in range(0, 2000):
 
     H_New = Hj - dtdx * (H_Plus2 * U_Plus2 - H_Minus2 * U_Minus2)
     U_New = Uj - dtdx * (F_U(U_Plus2, H_Plus2, Z_Plus2) - F_U(U_Minus2, H_Minus2, Z_Minus2))
-    Flow = U_New * H_New * dtdx
+    return H_New, U_New
+
+dt = baseline_dt
+for step in range(0, 2000):
+    # Boundary
+    H[0] = H[1]
+    H[N + 1] = H[N]
+    U *= v_damping
+    U[0] = -U[1]
+    U[N + 1] = -U[N]
+
+    H_New, U_New = Lax_Wendroff(H, U, Z, dt)
+
+    if np.max(np.abs(U_New)) * dt < dx / 2 and dt * 2 < baseline_dt * 1.1:
+        dt *= 2
+        H_New, U_New = Lax_Wendroff(H, U, Z, dt)
+    while np.max(np.abs(U_New)) < 1e3 and np.max(np.abs(U_New)) * dt > dx:
+        dt /= 2
+        H_New, U_New = Lax_Wendroff(H, U, Z, dt)
+    if np.max(np.abs(U_New)) >= 1e3:
+        raise RuntimeError("Speed blows up!!")
+
+    # Preserve Volume (prevent negative H)
+    Flow = U_New * H_New * dt / dx
     Flow = (Flow[1:] + Flow[:-1]) / 2
     Flow = np.concatenate([[0], Flow, [0]])
 
-    # Preserve Volume (prevent negative H)
     Decrease = Flow[1:] - Flow[:-1]
     Decrease_Mul = np.minimum(H[1: -1] / np.maximum(Decrease, 1e-3), 1)
     Decrease_Mul[np.where(Decrease <= 0)] = 1
@@ -70,6 +86,10 @@ for step in range(0, 2000):
     H_N1 = np.maximum(H_N1, 0)
     H_N1[np.where(H_N1 < dry_threshold)] = 0
 
+    # Eliminate bouncing U near shoreline
+    U_Bound = (Flow[1:] + Flow[:-1]) / 2 / np.maximum(H_N1, dry_threshold) * dx / dt
+    U_New[np.where(np.abs(U_New) > np.abs(U_Bound))] = U_Bound[np.where(np.abs(U_New) > np.abs(U_Bound))]
+
     # Apply change
     H_Diff += np.sum(np.abs(H_N1 - H[1:-1]))
     H[1:-1] = H_N1
@@ -79,11 +99,11 @@ for step in range(0, 2000):
     if step % report_interval == 0:
         H_DiffAvg = H_Diff / report_interval
         H_Diff = 0
-        title = '#%d Diff=%.3f V=%.2f MaxU=%.1f' % (step, H_DiffAvg, sum(H[1: -1]), np.max(U))
+        title = '#%d Diff=%.3f V=%.2f MaxU=%.1f dt=%.4f' % (step, H_DiffAvg, sum(H[1: -1]), np.max(np.abs(U)), dt)
         fig.suptitle(title)
 
         ax1.clear()
-        ax1.set_ylim(0, 5)
+        ax1.set_ylim(0, 40)
         ax1.bar(x_axis, Z[1: -1] + H[1: -1], width=dx, color=(0, 0.4, 1, 0.4))
         ax1.bar(x_axis, Z[1: -1], width=dx, color=(0.6, 0.4, 0, 1))
 
@@ -96,6 +116,7 @@ for step in range(0, 2000):
         print('=====', title)
         print('[H]', H[1: -1])
         print('[U]', U[1: -1])
-        # input('continue...')
+        if manual_stepping:
+            input('continue...')
 
 plt.show()
