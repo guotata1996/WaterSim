@@ -3,7 +3,7 @@ import matplotlib.pyplot as plt
 
 g = 10
 N = 50
-baseline_dt = 0.0005  # For large max depth, use smaller value
+baseline_dt = 0.005  # For large max depth, use smaller value
 dx = 0.1
 v_damping = 0.99
 dry_threshold = 0.01
@@ -12,12 +12,12 @@ dry_threshold = 0.01
 H = np.zeros([N + 2])
 U = np.zeros([N + 2])
 Z = np.zeros([N + 2])
-# Z[N // 4: N // 2] = np.linspace(0, 15, len(Z[N // 4: N // 2]))
-# Z[N // 2: N * 3 // 4] = np.linspace(15, 0, len(Z[N // 2: N * 3 // 4]))
+Z[N // 4: N // 2] = np.linspace(0, 15, len(Z[N // 4: N // 2]))
+Z[N // 2: N * 3 // 4] = np.linspace(15, 0, len(Z[N // 2: N * 3 // 4]))
 H[:N // 4] = 40
 
 # Reporting
-report_interval = 100
+report_interval = 10
 manual_stepping = False
 
 H_Diff = 0
@@ -57,7 +57,58 @@ def FTCS(H, U, Z, dt):
     H_New[np.where(H_New < dry_threshold)] = 0
     return np.concatenate([[H[0]], H_New, [H[-1]]]), np.concatenate([[U[0]], U_New, [U[-1]]])
 
-step_function = FTCS
+def van_leer(r):
+    return 1 - (r + abs(r)) / (1 + abs(r))
+
+def Lax_Wendroff_Limit(H, U, Z, dt):
+    Hj = H[1: -1]
+    H_Plus = H[2:]
+    H_PlusPlus = np.concatenate([H[3:], [H[-1]]])
+    H_Minus = H[:-2]
+    H_MinusMinus = np.concatenate([[H[0]], H[:-3]])
+    Uj = U[1: -1]
+    U_Plus = U[2:]
+    U_PlusPlus = np.concatenate([U[3:], [U[-1]]])
+    U_Minus = U[:-2]
+    U_MinusMinus = np.concatenate([[U[0]], U[:-3]])
+    Zj = Z[1: -1]
+    Z_Plus = Z[2:]
+    Z_Minus = Z[:-2]
+
+    dtdx = dt / dx
+    H_Plus2 = (Hj + H_Plus) / 2 - dtdx / 2 * (H_Plus * U_Plus - Hj * Uj)
+    H_Minus2 = (H_Minus + Hj) / 2 - dtdx / 2 * (Hj * Uj - H_Minus * U_Minus)
+    U_Plus2 = (Uj + U_Plus) / 2 - dtdx / 2 * (F_U(U_Plus, H_Plus, Z_Plus) - F_U(Uj, Hj, Zj))
+    U_Minus2 = (U_Minus + Uj) / 2 - dtdx / 2 * (F_U(Uj, Hj, Zj) - F_U(U_Minus, H_Minus, Z_Minus))
+    Z_Plus2 = (Zj + Z_Plus) / 2
+    Z_Minus2 = (Z_Minus + Zj) / 2
+
+    H1 = np.copy(H)
+    U1 = np.copy(U)
+    for i in range(10):
+        H1, U1 = FTCS(H1, U1, Z, dt / 10)
+
+    H_Slope_Minus = np.abs(H_MinusMinus - H_Minus) / (np.maximum(np.abs(Hj - H_Minus), 0.01))
+    H_Slope_Plus = np.abs(H_PlusPlus - H_Plus) / (np.maximum(np.abs(H_Plus - Hj), 0.01))
+    H_Phi_Minus = van_leer(H_Slope_Minus)
+    H_Phi_Plus = van_leer(H_Slope_Plus)
+
+    U_Slope_Minus = np.abs(U_MinusMinus - U_Minus) / (np.maximum(np.abs(Uj - U_Minus), 0.01))
+    U_Slope_Plus = np.abs(U_PlusPlus - U_Plus) / (np.maximum(np.abs(U_Plus - Uj), 0.01))
+    U_Phi_Minus = van_leer(U_Slope_Minus)
+    U_Phi_Plus = van_leer(U_Slope_Plus)
+
+    H_Plus2_Limit = (1 - H_Phi_Plus) * (H1[2:] + H1[1:-1]) / 2 + H_Phi_Plus * H_Plus2
+    H_Minus2_Limit = (1 - H_Phi_Minus) * (H1[:-2] + H1[1:-1]) / 2 + H_Phi_Minus * H_Minus2
+    U_Plus2_Limit = (1 - U_Phi_Plus) * (U1[2:] + U1[1:-1]) / 2 + U_Phi_Plus * U_Plus2
+    U_Minus2_Limit = (1 - U_Phi_Minus) * (U1[:-2] + U1[1:-1]) / 2 + U_Phi_Minus * U_Minus2
+
+    H_New = Hj - dtdx * (H_Plus2_Limit * U_Plus2_Limit - H_Minus2_Limit * U_Minus2_Limit)
+    U_New = Uj - dtdx * (F_U(U_Plus2_Limit, H_Plus2_Limit, Z_Plus2) - F_U(U_Minus2_Limit, H_Minus2_Limit, Z_Minus2))
+    return np.concatenate([[H[0]], H_New, [H[-1]]]), np.concatenate([[U[0]], U_New, [U[-1]]])
+
+
+step_function = Lax_Wendroff
 
 dt = baseline_dt
 for step in range(0, 100000):
@@ -83,7 +134,7 @@ for step in range(0, 100000):
         raise RuntimeError("Speed blows up!!")
 
     # Preserve Volume (prevent negative H)
-    if step_function == Lax_Wendroff:
+    if step_function != FTCS:
         U_New = U_New[1:-1]
         H_New = H_New[1:-1]
         Flow = U_New * H_New * dt / dx
