@@ -1,9 +1,7 @@
 import numpy as np
 import sys
 import matplotlib.pyplot as plt
-
-np.set_printoptions(threshold=sys.maxsize, linewidth=np.nan)
-np.set_printoptions(formatter={'float': '{: 0.4f}'.format})
+from matplotlib.tri import Triangulation
 
 g = 10
 width = 2
@@ -22,19 +20,72 @@ Z = np.zeros([M + 2, N + 2])
 Plot_Xs = np.asarray(range(M)) * dx
 Plot_Ys = np.asarray(range(N)) * dx
 Plot_Xs, Plot_Ys = np.meshgrid(Plot_Xs, Plot_Xs)
+
 # Initial condition
 center_dist = np.sqrt(np.square(Plot_Xs - width / 2) + np.square(Plot_Ys - length / 2))
-Z[1:-1,1:-1] = np.maximum(0, 0.66 - center_dist)
-H[M//4:M//4*3, N//4:N//4*3] = 4
+Z[1:-1,1:-1] = 2 * np.maximum(0, 0.66 - center_dist)
+Z = Z + np.transpose(Z)
+H[:M//2, :N//2] = 2
 
-def F(h, uv, z):
-    return uv * uv / 2 + g * (h + z)
+# Plotting setup
+def to_1d_index(x, y):
+    return x + M * y
+
+def to_2d_index(i):
+    return i % M, i // M
+
+tris = []
+for i in range(M - 1):
+    for j in range(N - 1):
+        tris.append([to_1d_index(i, j), to_1d_index(i + 1, j), to_1d_index(i, j + 1)])
+        tris.append([to_1d_index(i + 1, j), to_1d_index(i + 1, j + 1), to_1d_index(i, j + 1)])
+masks = np.zeros([len(tris)])
 
 fig, ax1 = plt.subplots(1, 1, subplot_kw={"projection": "3d"})
 
+np.set_printoptions(threshold=sys.maxsize, linewidth=np.nan)
+np.set_printoptions(formatter={'float': '{: 0.4f}'.format})
+
+# Simulation loop
+def F(h, uv, z):
+    return uv * uv / 2 + g * (h + z)
+
 dt = baseline_dt
 step = 0
+H_Diff = 0
+
 while True:
+    title = '#%d Diff=%.3f V=%.2f MaxU=%.1f dt=%.4f' % (step, H_Diff, np.sum(H[1:-1, 1:-1]), np.max(np.abs(U)), dt)
+    fig.suptitle(title)
+
+    ax1.clear()
+    ax1.set_zlim(0, 5)
+
+    for index, (i1, i2, i3) in enumerate(tris):
+        index_x1, index_y1 = to_2d_index(i1)
+        index_x2, index_y2 = to_2d_index(i2)
+        index_x3, index_y3 = to_2d_index(i3)
+        dry = H[1 + index_x1, 1 + index_y1] == 0 and H[1 + index_x2, 1 + index_y2] == 0 and H[1 + index_x3, 1 + index_y3] == 0
+        masks[index] = dry
+
+    water_triangulation = Triangulation(Plot_Xs.ravel(), Plot_Ys.ravel(), triangles=np.asarray(tris), mask=masks)
+    stage = H[1:-1,1:-1] + Z[1:-1, 1:-1]
+    ground_triangulation = Triangulation(Plot_Xs.ravel(), Plot_Ys.ravel(), triangles=np.asarray(tris), mask=1 - masks)
+    ax1.plot_trisurf(ground_triangulation, Z[1:-1, 1:-1].ravel(), color=(0.6,0.4,0,0.4))
+    ax1.plot_trisurf(water_triangulation, stage.ravel(), color='b')
+
+    plt.pause(0.001)
+
+    print('=====', title)
+    print('[H]')
+    print(H[1:-1, 1:-1])
+    print('[U]')
+    print(U[1:-1, 1:-1])
+    print('[V]')
+    print(V[1:-1, 1:-1])
+
+    input('continue...')
+
     step += 1
 
     # Boundary
@@ -116,26 +167,5 @@ while True:
     H[1:-1, 1:-1] = H2
     U[1:-1, 1:-1] = U2
     V[1:-1, 1:-1] = V2
-
-    title = '#%d Diff=%.3f V=%.2f MaxU=%.1f dt=%.4f' % (step, H_Diff, np.sum(H[1:-1,1:-1]), np.max(np.abs(U)), dt)
-    fig.suptitle(title)
-
-    ax1.clear()
-    ax1.set_zlim(0, 5)
-    stage = Z[1:-1,1:-1] + H[1:-1,1:-1]
-    ax1.plot_surface(Plot_Xs, Plot_Ys, Z[1:-1,1:-1], linewidth=0, antialiased=False, color='y')
-    ax1.plot_surface(Plot_Xs, Plot_Ys, stage, linewidth=0, antialiased=False, color=(0, 0.4, 1, 0.6))
-
-    plt.pause(0.001)
-
-    # print('=====', title)
-    print('[H]')
-    print(H[1:-1,1:-1])
-    print('[U]')
-    print(U[1:-1,1:-1])
-    print('[V]')
-    print(V[1:-1,1:-1])
-    #
-    input('continue...')
 
 plt.show()
