@@ -15,21 +15,22 @@ dry_threshold = 0.01
 
 M = int(width / dx)
 N = int(length / dx)
-# Initial condition
 H = np.zeros([M + 2, N + 2])
 U = np.zeros([M + 2, N + 2])
 V = np.zeros([M + 2, N + 2])
 Z = np.zeros([M + 2, N + 2])
-H[:, :] = 1
-H[:M//2, :N//2] = 2
+Plot_Xs = np.asarray(range(M)) * dx
+Plot_Ys = np.asarray(range(N)) * dx
+Plot_Xs, Plot_Ys = np.meshgrid(Plot_Xs, Plot_Xs)
+# Initial condition
+center_dist = np.sqrt(np.square(Plot_Xs - width / 2) + np.square(Plot_Ys - length / 2))
+Z[1:-1,1:-1] = np.maximum(0, 0.66 - center_dist)
+H[M//4:M//4*3, N//4:N//4*3] = 4
 
 def F(h, uv, z):
     return uv * uv / 2 + g * (h + z)
 
 fig, ax1 = plt.subplots(1, 1, subplot_kw={"projection": "3d"})
-Plot_Xs = np.asarray(range(M)) * dx
-Plot_Ys = np.asarray(range(N)) * dx
-Plot_Xs, Plot_Ys = np.meshgrid(Plot_Xs, Plot_Xs)
 
 dt = baseline_dt
 step = 0
@@ -37,22 +38,22 @@ while True:
     step += 1
 
     # Boundary
-    H[:, 0] = H[:, 1]
-    H[:, N + 1] = H[:, N]
-    H[0, :] = H[1, :]
-    H[M + 1, :] = H[M, :]
+    H[1:-1, 0] = H[1:-1, 1]
+    H[1:-1, N + 1] = H[1:-1, N]
+    H[0, 1:-1] = H[1, 1:-1]
+    H[M + 1, 1:-1] = H[M, 1:-1]
 
     U *= v_damping
-    U[:, 0] = U[:, 1]
-    U[:, N + 1] = U[:, N]
-    U[0, :] = -U[1, :]
-    U[M + 1, :] = -U[M, :]
+    U[:, 0] = -U[:, 1]
+    U[:, N + 1] = -U[:, N]
+    U[0, :] = U[1, :]
+    U[M + 1, :] = U[M, :]
 
     V *= v_damping
-    V[:, 0] = -V[:, 1]
-    V[:, N + 1] = -V[:, N]
-    V[0, :] = V[1, :]
-    V[M + 1, :] = V[M, :]
+    V[:, 0] = V[:, 1]
+    V[:, N + 1] = V[:, N]
+    V[0, :] = -V[1, :]
+    V[M + 1, :] = -V[M, :]
 
     H_PlusZero = H[2:,1:-1]
     H_ZeroPlus = H[1:-1,2:]; H_ZeroZero = H[1:-1,1:-1]; H_ZeroMinus = H[1:-1,:-2]
@@ -121,18 +122,20 @@ while True:
 
     ax1.clear()
     ax1.set_zlim(0, 5)
-    ax1.plot_surface(Plot_Xs, Plot_Ys, H[1:-1,1:-1], linewidth=0, antialiased=False)
+    stage = Z[1:-1,1:-1] + H[1:-1,1:-1]
+    ax1.plot_surface(Plot_Xs, Plot_Ys, Z[1:-1,1:-1], linewidth=0, antialiased=False, color='y')
+    ax1.plot_surface(Plot_Xs, Plot_Ys, stage, linewidth=0, antialiased=False, color=(0, 0.4, 1, 0.6))
 
     plt.pause(0.001)
 
     # print('=====', title)
     print('[H]')
     print(H[1:-1,1:-1])
-    # print('[U]')
-    # print(U[1:-1,1:-1])
-    # print('[V]')
-    # print(V[1:-1,1:-1])
+    print('[U]')
+    print(U[1:-1,1:-1])
+    print('[V]')
+    print(V[1:-1,1:-1])
     #
-    # input('continue...')
+    input('continue...')
 
 plt.show()
