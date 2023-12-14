@@ -1,13 +1,12 @@
 import numpy as np
 import sys
-import matplotlib.pyplot as plt
-from matplotlib.tri import Triangulation
+import open3d as o3d
 from PIL import Image
 
 g = 10
 width = 40
 length = 40
-dx = 1
+dx = 0.5
 v_damping = 0.99
 baseline_dt = 0.1
 dry_threshold = 1e-4
@@ -19,19 +18,16 @@ H = np.zeros([M + 2, N + 2])
 U = np.zeros([M + 2, N + 2])
 V = np.zeros([M + 2, N + 2])
 Z = np.zeros([M + 2, N + 2])
-Plot_Xs = np.asarray(range(M)) * dx
-Plot_Ys = np.asarray(range(N)) * dx
-Plot_Xs, Plot_Ys = np.meshgrid(Plot_Xs, Plot_Xs)
+
+Plot_Xs = []
+Plot_Ys = []
 
 # Initial condition
 img = Image.open('C:/EarthSculptor/Maps/T.png')
 img_resize = img.resize([M, N])
 heights01 = np.array(img_resize, np.float32) / 65536
-# center_dist = np.sqrt(np.square(Plot_Xs - width / 2) + np.square(Plot_Ys - length / 2))
-# Z[1:-1,1:-1] = 10 * np.maximum(0, 0.66 - center_dist)
-# Z = Z + np.transpose(Z)
 Z[1:-1,1:-1] = heights01 * 10
-H[34:37, 19:22] = 5
+H[68:74, 38:44] = 5
 
 # Plotting setup
 visual_interval = 10
@@ -43,22 +39,29 @@ def to_2d_index(i):
     return i // M, i % M
 
 tris = []
-for i in range(M - 1):
-    for j in range(N - 1):
-        tris.append([to_1d_index(i, j), to_1d_index(i + 1, j), to_1d_index(i, j + 1)])
-        tris.append([to_1d_index(i + 1, j), to_1d_index(i + 1, j + 1), to_1d_index(i, j + 1)])
+for j in range(N):
+    for i in range(M):
+        base_v = len(Plot_Xs)
+        Plot_Xs.append(i * dx); Plot_Ys.append(j * dx)
+        Plot_Xs.append((i + 1) * dx); Plot_Ys.append(j * dx)
+        Plot_Xs.append((i + 1) * dx); Plot_Ys.append((j + 1) * dx)
+        Plot_Xs.append(i * dx); Plot_Ys.append((j + 1) * dx)
+
+        tris.append([base_v, base_v + 1, base_v + 2])
+        tris.append([base_v, base_v + 2, base_v + 3])
+
+        if i != M - 1:
+            tris.append([base_v + 1, base_v + 4, base_v + 7])
+            tris.append([base_v + 1, base_v + 7, base_v + 2])
+        if j != N - 1:
+            tris.append([base_v + 2, base_v + 1 + 4 * M, base_v + 4 * M])
+            tris.append([base_v + 2, base_v + 4 * M, base_v + 3])
+mesh_triangles = np.array(tris)
+
+Plot_Xs = np.asarray(Plot_Xs)
+Plot_Ys = np.asarray(Plot_Ys)
+
 masks = np.zeros([len(tris)])
-
-fig = plt.figure()
-
-ax_st = fig.add_subplot(2, 2, 1, projection='3d')
-ax_st.set_title('Stage')
-ax_h = fig.add_subplot(2, 2, 2)
-ax_h.set_title('H')
-ax_u = fig.add_subplot(2, 2, 3)
-ax_u.set_title('U-abs')
-ax_v = fig.add_subplot(2, 2, 4)
-ax_v.set_title('V-abs')
 
 np.set_printoptions(threshold=sys.maxsize, linewidth=np.nan)
 np.set_printoptions(formatter={'float': '{: 0.4f}'.format})
@@ -67,22 +70,7 @@ np.set_printoptions(formatter={'float': '{: 0.4f}'.format})
 def F(h, uv, z):
     return uv * uv / 2 + g * (h + z)
 
-def fill_insufficient_segment_with_min(a: np.ndarray):
-    from skimage.morphology import flood
-    done = np.zeros_like(a)
-    insufficient_map = a < 1
-    done[np.where(insufficient_map == 0)] = 1
-    while True:
-        pending_x, pending_y = np.where(done == 0)
-        if len(pending_x) == 0:
-            return
-        x0 = pending_x[0]
-        y0 = pending_y[0]
-        region = flood(insufficient_map, (x0, y0), connectivity=1)
-        a[region] = np.min(a[region])
-        done[region] = 1
-
-def preserve_volume(H_Original, H_New, U, V, dt):
+def preserve_volume(H_Original, U, V, dt):
     dtdx = dt / dx
 
     Is_U_Upwind = (U[1:] + U[:-1]) > 0
@@ -100,10 +88,10 @@ def preserve_volume(H_Original, H_New, U, V, dt):
         Decrease = Flow_X[1:, :] - Flow_X[:-1, :] + Flow_Y[:, 1:] - Flow_Y[:, :-1]
         Proposed_H = H_Original - Decrease
         drying_ups = np.where(Proposed_H < -1e-6)  # M*N
-        if loop == 0:
-            print("N dry", len(drying_ups[0]))
         if len(drying_ups[0]) == 0:
             return Proposed_H, Flow_X, Flow_Y
+        else:
+            raise Exception("NDry != 0")
 
         loop += 1
         cell = drying_ups[0][0], drying_ups[1][0]
@@ -202,47 +190,58 @@ dt = baseline_dt
 step = 0
 H_Diff = 0
 
-while True:
-    if step % visual_interval == 0:
-        title = '#%d Diff=%.3f V=%.2f MaxU=%.1f MaxV=%.1f dt=%.4f' % \
-                (step, H_Diff, np.sum(H[1:-1, 1:-1]), np.max(np.abs(U)), np.max(np.abs(V)), dt)
-        fig.suptitle(title)
+vis = o3d.visualization.VisualizerWithKeyCallback()
 
-        ax_st.clear()
-        ax_st.set_zlim(0, 20)
+vis.create_window()
+stage_mesh = o3d.geometry.TriangleMesh()
 
-        for index, (i1, i2, i3) in enumerate(tris):
-            index_x1, index_y1 = to_2d_index(i1)
-            index_x2, index_y2 = to_2d_index(i2)
-            index_x3, index_y3 = to_2d_index(i3)
-            dry = H[1 + index_x1, 1 + index_y1] < dry_threshold_disp \
-                  and H[1 + index_x2, 1 + index_y2] < dry_threshold_disp \
-                  and H[1 + index_x3, 1 + index_y3] < dry_threshold_disp
-            masks[index] = dry
+stage_mesh.vertices = o3d.utility.Vector3dVector(np.array([[2, 2, 0],
+                          [5, 2, 0],
+                          [5, 5, 0]]))
+stage_mesh.triangles = o3d.utility.Vector3iVector(np.array([[0, 1, 2]]).astype(np.int32))
+stage_mesh.vertex_colors = o3d.utility.Vector3dVector(np.array([[0.1, 0.2, 1],
+                          [0.1, 0.2, 1],
+                          [0.1, 0.2, 1]]))
+stage_mesh.compute_vertex_normals()
 
-        water_triangulation = Triangulation(Plot_Xs.ravel(), Plot_Ys.ravel(), triangles=np.asarray(tris), mask=masks)
-        stage = H[1:-1,1:-1] + Z[1:-1, 1:-1]
-        ground_triangulation = Triangulation(Plot_Xs.ravel(), Plot_Ys.ravel(), triangles=np.asarray(tris), mask=1 - masks)
-        ax_st.plot_trisurf(ground_triangulation, Z[1:-1, 1:-1].ravel(), color=(0.6, 0.4, 0, 0.4))
-        ax_st.plot_trisurf(water_triangulation, stage.ravel(), color='b')
+vis.add_geometry(stage_mesh)
 
-        ax_h.imshow(np.abs(H[1:-1]), cmap='hot', interpolation='nearest')
-        ax_u.imshow(np.abs(U[1:-1]), cmap='hot', interpolation='nearest')
-        ax_v.imshow(np.abs(V[1:-1]), cmap='hot', interpolation='nearest')
+single_step_mode = False
+continuous_running = False
+single_step_left = 0
 
-        plt.pause(0.001 if step > 0 else 3)
+def step_simulation(vis):
+    global single_step_left
 
-        # print('=====', title)
-        # print('[H]')
-        # print(H[1:-1, 1:-1])
-        # print('[U]')
-        # print(U[1:-1, 1:-1])
-        # print('[V]')
-        # print(V[1:-1, 1:-1])
+    if single_step_mode:
+        if single_step_left > 0:
+            single_step_left -= 1
+        else:
+            return
+    else:
+        if not continuous_running:
+            return
 
-        # input('continue...')
+    global step, H, U, V, dt
 
     step += 1
+    stage = H[1:-1, 1:-1] + Z[1:-1, 1:-1]
+    repeated_stage = np.transpose(np.vstack([stage.ravel()] * 4))
+
+    mesh_vertices = np.transpose(np.vstack([Plot_Xs.ravel(), Plot_Ys.ravel(), repeated_stage.ravel()]))
+
+    dry = H[1:-1, 1:-1] < dry_threshold_disp
+    dry = np.reshape(dry, [-1])
+    quad_colors = np.empty([len(dry), 3])
+    quad_colors[:] = [0.1, 0.4, 0.9]
+    quad_colors[np.where(dry)] = [0.7, 0.3, 0.2]
+    vertex_colors = np.repeat(quad_colors, 4, axis=0)
+
+    stage_mesh.vertices = o3d.utility.Vector3dVector(mesh_vertices * 0.1)
+    stage_mesh.triangles = o3d.utility.Vector3iVector(mesh_triangles)
+    stage_mesh.vertex_colors = o3d.utility.Vector3dVector(vertex_colors)
+    stage_mesh.compute_vertex_normals()
+    stage_mesh.compute_triangle_normals()
 
     # Boundary
     H[1:-1, 0] = H[1:-1, 1]
@@ -275,7 +274,7 @@ while True:
     if np.max(np.abs(U2)) >= 1e3 or np.max(np.abs(V2)) >= 1e3:
         raise RuntimeError("Speed blows up!!")
 
-    H3, Flow_X, Flow_Y = preserve_volume(H[1:-1,1:-1], H2, U2, V2, dt)
+    H3, Flow_X, Flow_Y = preserve_volume(H[1:-1, 1:-1], U2, V2, dt)
     H3[np.where(H3 < dry_threshold)] = 0
 
     U2[np.where(H3 == 0)] = 0
@@ -288,9 +287,38 @@ while True:
     V2[V_OverBound] = V_Bound[V_OverBound]
 
     # Apply change
-    H_Diff = np.sum(np.abs(H3 - H[1:-1,1:-1]))
+    H_Diff = np.sum(np.abs(H3 - H[1:-1, 1:-1]))
     H[1:-1, 1:-1] = H3
     U[1:-1, 1:-1] = U2
     V[1:-1, 1:-1] = V2
 
-plt.show()
+    if step % visual_interval == 0:
+        title = '#%d Diff=%.3f V=%.2f MaxU=%.1f MaxV=%.1f dt=%.4f' % \
+                (step, H_Diff, np.sum(H[1:-1, 1:-1]), np.max(np.abs(U)), np.max(np.abs(V)), dt)
+        print(title)
+        return True
+    else:
+        return False
+
+def pause_resume(vis):
+    global continuous_running, single_step_mode
+    single_step_mode = False
+    continuous_running = not continuous_running
+    return False
+
+def single_step(vis):
+    if not continuous_running:
+        global single_step_mode, single_step_left
+        single_step_mode = True
+        single_step_left = visual_interval
+
+def stop(vis):
+    vis.close()
+
+vis.register_animation_callback(step_simulation)
+vis.register_key_callback(ord('A'), pause_resume)
+vis.register_key_callback(ord('S'), single_step)
+vis.register_key_callback(ord('X'), stop)
+
+vis.run()
+vis.destroy_window()
