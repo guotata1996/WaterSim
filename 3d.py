@@ -6,7 +6,7 @@ from PIL import Image
 g = 10
 width = 40
 length = 40
-dx = 0.5
+dx = 1
 v_damping = 0.99
 baseline_dt = 0.1
 dry_threshold = 1e-4
@@ -17,17 +17,18 @@ N = int(length / dx)
 H = np.zeros([M + 2, N + 2])
 U = np.zeros([M + 2, N + 2])
 V = np.zeros([M + 2, N + 2])
-Z = np.zeros([M + 2, N + 2])
+Z = np.ones([M + 2, N + 2]) * 50
 
 Plot_Xs = []
 Plot_Ys = []
+grid_centers = []
 
 # Initial condition
 img = Image.open('C:/EarthSculptor/Maps/T.png')
 img_resize = img.resize([M, N])
 heights01 = np.array(img_resize, np.float32) / 65536
 Z[1:-1,1:-1] = heights01 * 10
-H[68:74, 38:44] = 5
+H[34:37, 19:22] = 15
 
 # Plotting setup
 visual_interval = 10
@@ -41,6 +42,7 @@ def to_2d_index(i):
 tris = []
 for j in range(N):
     for i in range(M):
+        grid_centers.append([(i + 0.5) * dx, (j + 0.5) * dx, 0])
         base_v = len(Plot_Xs)
         Plot_Xs.append(i * dx); Plot_Ys.append(j * dx)
         Plot_Xs.append((i + 1) * dx); Plot_Ys.append(j * dx)
@@ -60,6 +62,7 @@ mesh_triangles = np.array(tris)
 
 Plot_Xs = np.asarray(Plot_Xs)
 Plot_Ys = np.asarray(Plot_Ys)
+grid_centers = np.asarray(grid_centers)
 
 masks = np.zeros([len(tris)])
 
@@ -90,8 +93,6 @@ def preserve_volume(H_Original, U, V, dt):
         drying_ups = np.where(Proposed_H < -1e-6)  # M*N
         if len(drying_ups[0]) == 0:
             return Proposed_H, Flow_X, Flow_Y
-        else:
-            raise Exception("NDry != 0")
 
         loop += 1
         cell = drying_ups[0][0], drying_ups[1][0]
@@ -204,6 +205,18 @@ stage_mesh.vertex_colors = o3d.utility.Vector3dVector(np.array([[0.1, 0.2, 1],
                           [0.1, 0.2, 1]]))
 stage_mesh.compute_vertex_normals()
 
+u_points = np.zeros([M * N * 2, 3])
+v_points = np.zeros([M * N * 2, 3])
+uv_lines = [[a, a + 1] for a in range(0, M * N * 2, 2)]
+r_colors = [[1, 0, 0] for i in range(len(uv_lines))]
+y_colors = [[1, 1, 0] for i in range(len(uv_lines))]
+u_line_set = o3d.geometry.LineSet(points=o3d.utility.Vector3dVector(u_points), lines=o3d.utility.Vector2iVector(uv_lines))
+u_line_set.colors = o3d.utility.Vector3dVector(r_colors)
+v_line_set = o3d.geometry.LineSet(points=o3d.utility.Vector3dVector(v_points), lines=o3d.utility.Vector2iVector(uv_lines))
+v_line_set.colors = o3d.utility.Vector3dVector(y_colors)
+vis.add_geometry(u_line_set)
+vis.add_geometry(v_line_set)
+
 vis.add_geometry(stage_mesh)
 
 single_step_mode = False
@@ -225,23 +238,33 @@ def step_simulation(vis):
     global step, H, U, V, dt
 
     step += 1
-    stage = H[1:-1, 1:-1] + Z[1:-1, 1:-1]
-    repeated_stage = np.transpose(np.vstack([stage.ravel()] * 4))
 
-    mesh_vertices = np.transpose(np.vstack([Plot_Xs.ravel(), Plot_Ys.ravel(), repeated_stage.ravel()]))
+    if step % visual_interval == 0:
+        stage = H[1:-1, 1:-1] + Z[1:-1, 1:-1]
+        repeated_stage = np.transpose(np.vstack([stage.ravel()] * 4))
 
-    dry = H[1:-1, 1:-1] < dry_threshold_disp
-    dry = np.reshape(dry, [-1])
-    quad_colors = np.empty([len(dry), 3])
-    quad_colors[:] = [0.1, 0.4, 0.9]
-    quad_colors[np.where(dry)] = [0.7, 0.3, 0.2]
-    vertex_colors = np.repeat(quad_colors, 4, axis=0)
+        mesh_vertices = np.transpose(np.vstack([Plot_Xs.ravel(), Plot_Ys.ravel(), repeated_stage.ravel()]))
 
-    stage_mesh.vertices = o3d.utility.Vector3dVector(mesh_vertices * 0.1)
-    stage_mesh.triangles = o3d.utility.Vector3iVector(mesh_triangles)
-    stage_mesh.vertex_colors = o3d.utility.Vector3dVector(vertex_colors)
-    stage_mesh.compute_vertex_normals()
-    stage_mesh.compute_triangle_normals()
+        dry = H[1:-1, 1:-1] < dry_threshold_disp
+        dry = np.reshape(dry, [-1])
+        quad_colors = np.empty([len(dry), 3])
+        quad_colors[:] = [0.1, 0.4, 0.9]
+        quad_colors[np.where(dry)] = [0.7, 0.3, 0.2]
+        vertex_colors = np.repeat(quad_colors, 4, axis=0)
+
+        stage_mesh.vertices = o3d.utility.Vector3dVector(mesh_vertices * 0.1)
+        stage_mesh.triangles = o3d.utility.Vector3iVector(mesh_triangles)
+        stage_mesh.vertex_colors = o3d.utility.Vector3dVector(vertex_colors)
+        stage_mesh.compute_vertex_normals()
+        stage_mesh.compute_triangle_normals()
+
+        grid_centers[:, 2] = stage.ravel()
+        u_points[::2,:] = grid_centers
+        u_points[1::2,:] = grid_centers + np.expand_dims(U[1:-1,1:-1].flatten(), axis=1) * np.vstack([np.asarray([0, 1, 0])] * M * N)
+        v_points[::2,:] = grid_centers
+        v_points[1::2,:] = grid_centers + np.expand_dims(V[1:-1,1:-1].flatten(), axis=1) * np.vstack([np.asarray([1, 0, 0])] * M * N)
+        u_line_set.points = o3d.utility.Vector3dVector(u_points * 0.1)
+        v_line_set.points = o3d.utility.Vector3dVector(v_points * 0.1)
 
     # Boundary
     H[1:-1, 0] = H[1:-1, 1]
@@ -312,13 +335,10 @@ def single_step(vis):
         single_step_mode = True
         single_step_left = visual_interval
 
-def stop(vis):
-    vis.close()
 
 vis.register_animation_callback(step_simulation)
 vis.register_key_callback(ord('A'), pause_resume)
 vis.register_key_callback(ord('S'), single_step)
-vis.register_key_callback(ord('X'), stop)
 
 vis.run()
 vis.destroy_window()
