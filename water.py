@@ -12,6 +12,8 @@ class Simulator:
         self.N = self.terrain.shape[0]
         self.flowx = np.zeros([self.N + 1, self.N])
         self.flowy = np.zeros([self.N, self.N + 1])
+        self.vx = np.zeros([self.N + 1, self.N])
+        self.vy = np.zeros([self.N, self.N + 1])
 
     def step(self):
         self.flowx[0, :] = 0
@@ -48,6 +50,13 @@ class Simulator:
                         self.flowy[x, y] *= scale
                     if self.flowy[x, y + 1] > 0:
                         self.flowy[x, y + 1] *= scale
+
+        for y in range(self.N):
+            for x in range(1, self.N):
+                self.vx[x, y] = self.flowx[x, y] / max(self.water[x-1, y], self.water[x, y], 0.001)
+        for y in range(self.N):
+            for x in range(1, self.N):
+                self.vy[x, y] = self.flowy[x, y] / max(self.water[x, y-1], self.water[x, y], 0.001)
 
         for y in range(self.N):
             for x in range(self.N):
