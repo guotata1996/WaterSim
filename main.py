@@ -4,7 +4,7 @@ import numpy as np
 from water import Simulator
 
 simulation = Simulator(r'data\lake_fill.txt')
-STEP_SIZE = 10
+STEP_SIZE = 100
 
 paused = True
 trigger = False  # single-step
@@ -27,22 +27,22 @@ while True:
     ax.cla()
     ax.imshow(simulation.water, cmap='hot', interpolation='nearest')
 
-    max_v = max(np.max(np.abs(simulation.vx)),
-                np.max(np.abs(simulation.vy)),
+    max_v = max(np.max(np.abs(simulation.flowx)),
+                np.max(np.abs(simulation.flowy)),
                 0.001)
     for i in range(simulation.N):
         for j in range(1, simulation.N + 1):
-            mag = simulation.vy[i][j]
+            mag = simulation.flowy[i][j]
             mag = mag / max_v * 0.4
             ax.plot([j-0.5,j-0.5+mag],[i,i],color="cyan", linewidth=0.5)
 
     for i in range(1, simulation.N + 1):
         for j in range(simulation.N):
-            mag = simulation.vx[i][j]
+            mag = simulation.flowx[i][j]
             mag = mag / max_v * 0.4
             ax.plot([j, j], [i-0.5, i-0.5+mag], color="cyan", linewidth=0.5)
 
-    ax.set_title(f"{step} maxV={max_v:.3f}")
+    ax.set_title(f"{step} maxF={max_v:.3f}")
     #plt.show()
     plt.pause(0.01)
 
