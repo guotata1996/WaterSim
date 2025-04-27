@@ -29,7 +29,7 @@ class Simulator:
             if self.flowx[x, y] < 0:
                 boost = -flow_x_temp[x + 1, y] / max(self.water[x,y], 0.001)
             elif self.flowx[x, y] > 0:
-                boost = flow_x_temp[x - 1, y] / max(self.water[x,y], 0.001)
+                boost = flow_x_temp[x - 1, y] / max(self.water[x-1,y], 0.001)
             boost = max(0, min(1, boost))
             boost = np.exp(boost)
 
@@ -41,7 +41,7 @@ class Simulator:
             if self.flowy[x, y] < 0:
                 boost = -flow_y_temp[x, y + 1] / max(self.water[x,y], 0.001)
             elif self.flowy[x, y] > 0:
-                boost = flow_y_temp[x, y - 1] / max(self.water[x,y], 0.001)
+                boost = flow_y_temp[x, y - 1] / max(self.water[x,y-1], 0.001)
             boost = max(0, min(1, boost))
             boost = np.exp(boost)
 

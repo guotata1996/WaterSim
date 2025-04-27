@@ -1,9 +1,9 @@
 import matplotlib.pyplot as plt
 import numpy as np
-
+from tqdm import tqdm
 from water import Simulator
 
-simulation = Simulator(r'data\lake_fill.txt')
+simulation = Simulator(r'data\channel.txt')
 STEP_SIZE = 100
 
 paused = True
@@ -23,6 +23,7 @@ fig.canvas.mpl_connect('key_press_event', on_press)
 fig.canvas.mpl_connect('close_event', on_close)
 step = 0
 
+p = tqdm()
 while True:
     ax.cla()
     ax.imshow(simulation.water, cmap='hot', interpolation='nearest')
@@ -53,4 +54,5 @@ while True:
     step += STEP_SIZE
     trigger = False
     for _ in range(STEP_SIZE):
+        p.update()
         simulation.step()
