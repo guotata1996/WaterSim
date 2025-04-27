@@ -3,7 +3,7 @@ import numpy as np
 from tqdm import tqdm
 from water import Simulator
 
-simulation = Simulator(r'data\channel.txt')
+simulation = Simulator(r'data\lake_fill.txt')
 STEP_SIZE = 100
 
 paused = True

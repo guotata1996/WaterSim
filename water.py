@@ -20,34 +20,23 @@ class Simulator:
         self.flowy[:, 0] = 0
         self.flowy[:, self.N] = 0
 
-        flow_x_temp = np.copy(self.flowx)
-        flow_y_temp = np.copy(self.flowy)
+        boost_x1 = np.maximum(0, -np.sign(self.flowx[1:-1,:])) * (-self.flowx[2:,:]) / np.maximum(self.water[1:,:], 0.001)
+        boost_x2 = np.maximum(0, np.sign(self.flowx[1:-1,:])) * self.flowx[:-2,:] / np.maximum(self.water[:-1,:], 0.001)
+        boost_x = np.maximum(boost_x1, boost_x2)
+        boost_x = np.minimum(1, boost_x)
+        boost_x = np.exp(boost_x)
+        self.flowx[1:-1] = self.flowx[1:-1] * frictionFactor + \
+            boost_x * ((self.water[:-1,:] + self.terrain[:-1:]) - (self.water[1:,:] + self.terrain[1:,:])) * g * dt / dx
 
-        f_order = list(product(range(1, self.N), range(self.N)))
-        for x, y in f_order:
-            boost = 0
-            if self.flowx[x, y] < 0:
-                boost = -flow_x_temp[x + 1, y] / max(self.water[x,y], 0.001)
-            elif self.flowx[x, y] > 0:
-                boost = flow_x_temp[x - 1, y] / max(self.water[x-1,y], 0.001)
-            boost = max(0, min(1, boost))
-            boost = np.exp(boost)
+        boost_y1 = np.maximum(0, -np.sign(self.flowy[:,1:-1])) * (-self.flowy[:,2:]) / np.maximum(self.water[:,1:], 0.001)
+        boost_y2 = np.maximum(0, np.sign(self.flowy[:,1:-1])) * self.flowy[:,:-2] / np.maximum(self.water[:,:-1], 0.001)
+        boost_y = np.maximum(boost_y1, boost_y2)
+        boost_y = np.minimum(1, boost_y)
+        boost_y = np.exp(boost_y)
+        self.flowy[:,1:-1] = self.flowy[:,1:-1] * frictionFactor + \
+            boost_y * ((self.water[:,:-1] + self.terrain[:,:-1]) - (self.water[:,1:] + self.terrain[:,1:])) * g * dt / dx
 
-            self.flowx[x, y] = flow_x_temp[x, y] * frictionFactor + \
-                          boost * ((self.water[x - 1, y] + self.terrain[x - 1, y]) - (self.water[x, y] + self.terrain[x, y])) * g * dt / dx
-
-        for y, x in f_order:
-            boost = 0
-            if self.flowy[x, y] < 0:
-                boost = -flow_y_temp[x, y + 1] / max(self.water[x,y], 0.001)
-            elif self.flowy[x, y] > 0:
-                boost = flow_y_temp[x, y - 1] / max(self.water[x,y-1], 0.001)
-            boost = max(0, min(1, boost))
-            boost = np.exp(boost)
-
-            self.flowy[x, y] = flow_y_temp[x, y] * frictionFactor + \
-                          boost * ((self.water[x, y - 1] + self.terrain[x, y - 1]) - (self.water[x, y] + self.terrain[x, y])) * g * dt / dx
-
+        # Non-parallel part
         scale_order = list(product(range(self.N), range(self.N)))
         np.random.shuffle(scale_order)
         for y, x in scale_order:
@@ -69,6 +58,4 @@ class Simulator:
                 if self.flowy[x, y + 1] > 0:
                     self.flowy[x, y + 1] *= scale
 
-        for y in range(self.N):
-            for x in range(self.N):
-                self.water[x, y] += (self.flowx[x, y] + self.flowy[x, y] - self.flowx[x + 1, y] - self.flowy[x, y + 1]) * dt / dx / dy
+        self.water += (self.flowx[:-1] + self.flowy[:,:-1] - self.flowx[1:] - self.flowy[:,1:]) * dt / dx / dy
