@@ -5,7 +5,7 @@ import numpy as np
 from tqdm import tqdm
 from water import Simulator
 
-simulation = Simulator(r'data\channel.txt')
+simulation = Simulator(r'data\sink.txt')
 STEP_SIZE = 100
 
 paused = True
@@ -40,19 +40,19 @@ while True:
     surface = (simulation.water > 0.001) * (simulation.water + simulation.terrain)
     norm = Normalize(vmin=0, vmax=max(0.5, simulation.water.max()))
     ax.imshow(surface[1:-1,1:-1], cmap=custom_cmap, norm=norm, origin='lower',
-              extent=(0.5,surface.shape[0]-1.5,
-                      0.5,surface.shape[1]-1.5))
+              extent=(0.5,surface.shape[1]-1.5,
+                      0.5,surface.shape[0]-1.5))
 
     max_v = max(np.max(np.abs(simulation.flowx)),
                 np.max(np.abs(simulation.flowy)),
                 0.001)
-    for i in range(simulation.N):
+    for i in range(simulation.M):
         for j in range(1, simulation.N + 1):
             mag = simulation.flowy[i][j]
             mag = mag / max_v * 0.4
             ax.plot([j-0.5,j-0.5+mag],[i,i],color="red", linewidth=1)
 
-    for i in range(1, simulation.N + 1):
+    for i in range(1, simulation.M + 1):
         for j in range(simulation.N):
             mag = simulation.flowx[i][j]
             mag = mag / max_v * 0.4
