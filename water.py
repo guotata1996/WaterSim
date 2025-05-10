@@ -9,16 +9,24 @@ dt = 1
 
 class Simulator:
     def __init__(self, vxl:str):
-        self.terrain, self.water = import_vxl(vxl)
-        self.N = self.terrain.shape[0]
+        terrain, water = import_vxl(vxl)
+        self.N = terrain.shape[0] + 2
+
+        self.terrain = np.empty((self.N,self.N))
+        self.terrain[1:-1,1:-1] = terrain
+        self.terrain[0,:] = self.terrain[1,:]
+        self.terrain[-1,:] = self.terrain[-2,:]
+        self.terrain[:,0] = self.terrain[:,1]
+        self.terrain[:,-1] = self.terrain[:,-2]
+        self.terrain[0,0] = self.terrain[0,-1] = self.terrain[-1,0] = self.terrain[-1,-1] = -1
+
+        self.water = np.zeros((self.N,self.N))
+        self.water[1:-1,1:-1] = water
+
         self.flowx = np.zeros([self.N + 1, self.N])
         self.flowy = np.zeros([self.N, self.N + 1])
 
     def step(self):
-        self.flowx[0, :] = 0
-        self.flowx[self.N, :] = 0
-        self.flowy[:, 0] = 0
-        self.flowy[:, self.N] = 0
 
         boost_x1 = np.maximum(0, -np.sign(self.flowx[1:-1,:])) * (-self.flowx[2:,:]) / np.maximum(self.water[1:,:], 0.001)
         boost_x2 = np.maximum(0, np.sign(self.flowx[1:-1,:])) * self.flowx[:-2,:] / np.maximum(self.water[:-1,:], 0.001)
@@ -59,3 +67,8 @@ class Simulator:
                     self.flowy[x, y + 1] *= scale
 
         self.water += (self.flowx[:-1] + self.flowy[:,:-1] - self.flowx[1:] - self.flowy[:,1:]) * dt / dx / dy
+
+        self.water[0,:] = 0
+        self.water[-1,:] = 0
+        self.water[:,0] = 0
+        self.water[:,-1] = 0

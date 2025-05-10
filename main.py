@@ -5,7 +5,7 @@ import numpy as np
 from tqdm import tqdm
 from water import Simulator
 
-simulation = Simulator(r'data\lake_fill.txt')
+simulation = Simulator(r'data\flat.txt')
 STEP_SIZE = 100
 
 paused = True
@@ -38,8 +38,10 @@ while True:
     ax.cla()
 
     surface = (simulation.water > 0.001) * (simulation.water + simulation.terrain)
-    norm = Normalize(vmin=0, vmax=simulation.water.max())
-    ax.imshow(surface, cmap=custom_cmap, norm=norm, origin='lower')
+    norm = Normalize(vmin=0, vmax=max(0.5, simulation.water.max()))
+    ax.imshow(surface[1:-1,1:-1], cmap=custom_cmap, norm=norm, origin='upper',
+              extent=(0.5,surface.shape[0]-1.5,
+                      0.5,surface.shape[1]-1.5))
 
     max_v = max(np.max(np.abs(simulation.flowx)),
                 np.max(np.abs(simulation.flowy)),
