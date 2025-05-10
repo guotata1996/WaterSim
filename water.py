@@ -6,10 +6,11 @@ frictionFactor = 0.5
 g = 10
 dx = dy = 10
 dt = 1
+sourceScale = 0.01
 
 class Simulator:
     def __init__(self, vxl:str):
-        terrain, water = import_vxl(vxl)
+        terrain, water, source = import_vxl(vxl)
         self.N = terrain.shape[0] + 2
 
         self.terrain = np.empty((self.N,self.N))
@@ -23,10 +24,16 @@ class Simulator:
         self.water = np.zeros((self.N,self.N))
         self.water[1:-1,1:-1] = water
 
+        self.source = {}
+        for (x, y), intensity in source.items():
+            self.source[(x+1,y+1)] = intensity
+
         self.flowx = np.zeros([self.N + 1, self.N])
         self.flowy = np.zeros([self.N, self.N + 1])
 
     def step(self):
+        for (x, y), intensity in self.source.items():
+            self.water[x,y] += intensity * dt * sourceScale
 
         boost_x1 = np.maximum(0, -np.sign(self.flowx[1:-1,:])) * (-self.flowx[2:,:]) / np.maximum(self.water[1:,:], 0.001)
         boost_x2 = np.maximum(0, np.sign(self.flowx[1:-1,:])) * self.flowx[:-2,:] / np.maximum(self.water[:-1,:], 0.001)

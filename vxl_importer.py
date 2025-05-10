@@ -1,6 +1,7 @@
 # goxel https://github.com/guillaumechereau/goxel/releases/tag/v0.15.1
 
 import numpy as np
+from collections import defaultdict
 
 def import_vxl(fpath):
     xmin = ymin = zmin = 9999
@@ -33,8 +34,14 @@ def import_vxl(fpath):
         if color == '8f563b':
             terrain[x - xmin, y - ymin] = max(terrain[x - xmin, y - ymin], z - zmax)
 
-    water = np.zeros([xmax - xmin + 1, ymax - ymin + 1])
+    # 639bff is water
+    # fbf236 is source
+    water = np.zeros_like(terrain)
+    source = defaultdict(lambda : 0)
     for x, y, z, color in lines:
-        if color == '639bff':
+        if color == '639bff' or color == 'fbf236':
             water[x - xmin, y-ymin] = max(water[x - xmin, y-ymin], z - terrain[x - xmin, y - ymin])
-    return terrain, water
+        if color == 'fbf236':
+            source[(x - xmin, y-ymin)] += 1
+
+    return terrain, water, source

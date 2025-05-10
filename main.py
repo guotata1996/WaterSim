@@ -5,7 +5,7 @@ import numpy as np
 from tqdm import tqdm
 from water import Simulator
 
-simulation = Simulator(r'data\flat.txt')
+simulation = Simulator(r'data\channel.txt')
 STEP_SIZE = 100
 
 paused = True
@@ -39,7 +39,7 @@ while True:
 
     surface = (simulation.water > 0.001) * (simulation.water + simulation.terrain)
     norm = Normalize(vmin=0, vmax=max(0.5, simulation.water.max()))
-    ax.imshow(surface[1:-1,1:-1], cmap=custom_cmap, norm=norm, origin='upper',
+    ax.imshow(surface[1:-1,1:-1], cmap=custom_cmap, norm=norm, origin='lower',
               extent=(0.5,surface.shape[0]-1.5,
                       0.5,surface.shape[1]-1.5))
 
