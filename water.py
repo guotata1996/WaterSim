@@ -2,11 +2,11 @@ import numpy as np
 from itertools import product
 from vxl_importer import import_vxl
 
-frictionFactor = 0.2
+frictionFactor = 0.02
 g = 0.1
 dx = 1
-dt = 0.1
-sourceRate = 0.1 # m/s
+dt = 0.5
+sourceRate = 0.2 # m/s
 
 class Simulator:
     def __init__(self, vxl:str):
@@ -53,28 +53,49 @@ class Simulator:
         self.flowy[:,1:-1] = self.flowy[:,1:-1] * (1 - frictionFactor * dt) + \
                              boost_y * ((self.water[:,:-1] + self.terrain[:,:-1]) - (self.water[:,1:] + self.terrain[:,1:])) * g * dt * dx
 
-        # Non-parallel part
-        scale_order = list(product(range(self.M), range(self.N)))
-        np.random.shuffle(scale_order)
-        for x, y in scale_order:
-            total_outflow = 0  # m^3/s
-            total_outflow += max(0, -self.flowx[x, y])
-            total_outflow += max(0, -self.flowy[x, y])
-            total_outflow += max(0, self.flowx[x + 1, y])
-            total_outflow += max(0, self.flowy[x, y + 1])
+        # Overdraft mitigation
+        total_outflow = np.maximum(0, -self.flowx[:-1]) + np.maximum(0, self.flowx[1:]) + \
+            np.maximum(0, -self.flowy[:,:-1]) + np.maximum(0, self.flowy[:,1:])
+        scale = (total_outflow == 0) + (total_outflow > 0) * (self.water * dx * dx / dt / np.maximum(total_outflow, 0.001))
+        scale = np.minimum(1, scale)
 
-            if total_outflow > 0:
-                max_outflow = self.water[x, y] * dx * dx / dt
-                scale = min(1, max_outflow / total_outflow)
-                if self.flowx[x, y] < 0:
-                    self.flowx[x, y] *= scale
-                if self.flowx[x + 1, y] > 0:
-                    self.flowx[x + 1, y] *= scale
-                if self.flowy[x, y] < 0:
-                    self.flowy[x, y] *= scale
-                if self.flowy[x, y + 1] > 0:
-                    self.flowy[x, y + 1] *= scale
+        scaled_by_right = self.flowx[:-1] < 0
+        scaled_by_left = self.flowx[1:] > 0
+        scaled_xl = self.flowx[:-1] * scaled_by_right * scale
+        scaled_xr = self.flowx[1:] * scaled_by_left * scale
+        self.flowx[:-1] = scaled_xl
+        self.flowx[-1] = 0
+        self.flowx[1:] += scaled_xr
 
+        scaled_by_bottom = self.flowy[:,:-1] < 0
+        scaled_by_top = self.flowy[:,1:] > 0
+        scaled_yb = self.flowy[:,:-1] * scaled_by_bottom * scale
+        scaled_yt = self.flowy[:,1:] * scaled_by_top * scale
+        self.flowy[:,:-1] = scaled_yb
+        self.flowy[:,-1] = 0
+        self.flowy[:,1:] += scaled_yt
+
+        # Equivalent to this non-parallel version
+        # for x, y in list(product(range(self.M), range(self.N))):
+        #     total_outflow = 0  # m^3/s
+        #     total_outflow += max(0, -self.flowx[x, y])
+        #     total_outflow += max(0, -self.flowy[x, y])
+        #     total_outflow += max(0, self.flowx[x + 1, y])
+        #     total_outflow += max(0, self.flowy[x, y + 1])
+        #
+        #     if total_outflow > 0:
+        #         max_outflow = self.water[x, y] * dx * dx / dt
+        #         scale = min(1, max_outflow / total_outflow)
+        #         if self.flowx[x, y] < 0:
+        #             self.flowx[x, y] *= scale
+        #         if self.flowx[x + 1, y] > 0:
+        #             self.flowx[x + 1, y] *= scale
+        #         if self.flowy[x, y] < 0:
+        #             self.flowy[x, y] *= scale
+        #         if self.flowy[x, y + 1] > 0:
+        #             self.flowy[x, y + 1] *= scale
+
+        # Move water
         self.water += (self.flowx[:-1] + self.flowy[:,:-1] - self.flowx[1:] - self.flowy[:,1:]) * dt / dx / dx
 
         # Outer border is cliff

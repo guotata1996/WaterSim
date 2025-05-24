@@ -2,7 +2,7 @@ import matplotlib.pyplot as plt
 from matplotlib.colors import LinearSegmentedColormap, Normalize
 
 import numpy as np
-from tqdm import tqdm
+import time
 from water import Simulator
 
 simulation = Simulator(r'data\sink.txt')
@@ -33,7 +33,7 @@ colors = [
 
 custom_cmap = LinearSegmentedColormap.from_list('BrownToBlueSmooth', colors)
 
-p = tqdm()
+steps_per_sec = 0
 while True:
     ax.cla()
 
@@ -58,7 +58,7 @@ while True:
             mag = mag / max_v * 0.4
             ax.plot([j, j], [i-0.5, i-0.5+mag], color="red", linewidth=1)
 
-    ax.set_title(f"{step} maxF={max_v:.3f}")
+    ax.set_title(f"Step:{step} | Vel={max_v:.3f} | Vol= {np.sum(simulation.water):.2f} | {steps_per_sec} FPS")
     #plt.show()
     plt.pause(0.01)
 
@@ -68,6 +68,8 @@ while True:
 
     step += STEP_SIZE
     trigger = False
+    t_start = time.time()
     for _ in range(STEP_SIZE):
-        p.update()
         simulation.step()
+    t_spent = time.time() - t_start
+    steps_per_sec = int(1 / t_spent)
