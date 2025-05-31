@@ -23,7 +23,6 @@ def on_close(event):
 fig, ax = plt.subplots()
 fig.canvas.mpl_connect('key_press_event', on_press)
 fig.canvas.mpl_connect('close_event', on_close)
-step = 0
 
 colors = [
     (0.0, (0.6, 0.3, 0.0)),    # 0 -> brown
@@ -58,7 +57,7 @@ while True:
             mag = mag / max_v * 0.4
             ax.plot([j, j], [i-0.5, i-0.5+mag], color="red", linewidth=1)
 
-    ax.set_title(f"Step:{step} | Vel={max_v:.3f} | Vol= {np.sum(simulation.water):.2f} | {steps_per_sec} FPS")
+    ax.set_title(f"T:{simulation.time:.1f} | Vel={max_v:.3f} | Vol= {np.sum(simulation.water):.2f} | {steps_per_sec} FPS")
     #plt.show()
     plt.pause(0.01)
 
@@ -66,7 +65,6 @@ while True:
         plt.pause(1)
         continue
 
-    step += STEP_SIZE
     trigger = False
     t_start = time.time()
     for _ in range(STEP_SIZE):
