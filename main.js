@@ -5,7 +5,7 @@ import * as tf from '@tensorflow/tfjs';
 import { applyPatchTo2DTensor } from './helper.js';
 
 
-const res = await fetch('./data/channel_17.txt');
+const res = await fetch('./data/channel_32.txt');
 const text = await res.text();
 
 const lines = text.trim().split('\n');
@@ -150,59 +150,108 @@ const dx2Bydt = dx.mul(dx).div(dt);
 
 function simulate()
 {
-    // Source injection
-    water = tf.add(water, tf.mul(dt, tf.mul(source, sourceRate)));
+    tf.tidy(() => {
+        // --- Source injection ---
+        const injected = tf.mul(dt, tf.mul(source, sourceRate));
+        const newWater1 = tf.add(water, injected);
+        water.dispose();
+        water = tf.keep(newWater1);
 
-    // Flow change due to gravity
-    const surface = tf.add(water, terrain);
-    let flowIncX = surface.slice([0,0], [M-1,N]).sub(surface.slice([1,0], [M-1,N]));
+        // --- Flow change due to gravity ---
+        const surface = tf.add(water, terrain);
 
-    flowIncX = flowIncX.mul(g).mul(dx);
-    flowX = applyPatchTo2DTensor(flowX, tf.add(flowX.slice([1,0], [M-1,N]), flowIncX), 1, 0);
+        let flowIncX = surface.slice([0, 0], [M - 1, N])
+            .sub(surface.slice([1, 0], [M - 1, N]))
+            .mul(g).mul(dx);
+        const newFlowX1 = applyPatchTo2DTensor(flowX, tf.add(flowX.slice([1, 0], [M - 1, N]), flowIncX), 1, 0);
+        flowX.dispose();
+        flowX = tf.keep(newFlowX1);
 
-    let flowIncY = surface.slice([0,0], [M, N-1]).sub(surface.slice([0,1], [M,N-1]));
-    flowIncY = flowIncY.mul(g).mul(dx);
-    flowY = applyPatchTo2DTensor(flowY, tf.add(flowY.slice([0,1], [M,N-1]), flowIncY), 0, 1);
-    // Overdraft mitigation
-    const totalOutflow = tf.add(tf.add(tf.maximum(0, tf.neg(flowX.slice([0,0], [M,N]))),
-                       tf.maximum(0, flowX.slice([1,0], [M,N]))),
-                       tf.add(tf.maximum(0, tf.neg(flowY.slice([0,0], [M,N]))),
-                       tf.maximum(0, flowY.slice([0,1], [M,N]))));
+        let flowIncY = surface.slice([0, 0], [M, N - 1])
+            .sub(surface.slice([0, 1], [M, N - 1]))
+            .mul(g).mul(dx);
+        const newFlowY1 = applyPatchTo2DTensor(flowY, tf.add(flowY.slice([0, 1], [M, N - 1]), flowIncY), 0, 1);
+        flowY.dispose();
+        flowY = tf.keep(newFlowY1);
 
-    const noOutFlow = tf.equal(totalOutflow, 0).cast('float32');
-    const hasOutFlow = tf.greater(totalOutflow, 0).cast('float32');
-    //console.log(totalOutflow.arraySync(), noOutFlow.arraySync());
-    let scale = noOutFlow.add(hasOutFlow.mul(water).mul(dx2Bydt).div(tf.maximum(totalOutflow, 0.001)));
-    scale = tf.minimum(scale, 1);
+        // --- Overdraft mitigation ---
+        const totalOutflow = tf.add(
+        tf.add(tf.maximum(0, tf.neg(flowX.slice([0, 0], [M, N]))),
+                tf.maximum(0, flowX.slice([1, 0], [M, N]))),
+        tf.add(tf.maximum(0, tf.neg(flowY.slice([0, 0], [M, N]))),
+                tf.maximum(0, flowY.slice([0, 1], [M, N])))
+        );
 
-    const scaledByRight = tf.less(flowX.slice([0,0], [M,N]), 0).cast('float32');
-    const scaledByLeft = tf.greater(flowX.slice([1,0], [M,N]), 0).cast('float32');
-    const scaledXL = flowX.slice([0,0], [M,N]).mul(scaledByRight).mul(scale);
-    const scaledXR = flowX.slice([1,0], [M,N]).mul(scaledByLeft).mul(scale);
-    flowX = applyPatchTo2DTensor(flowX, scaledXL, 0, 0);
-    //console.log(scale.arraySync());
-    flowX = applyPatchTo2DTensor(flowX, tf.zeros([1,N]), M, 0);
-    flowX = applyPatchTo2DTensor(flowX, flowX.slice([1,0], [M,N]).add(scaledXR), 1, 0);
+        const noOutFlow = tf.equal(totalOutflow, 0).cast('float32');
+        const hasOutFlow = tf.greater(totalOutflow, 0).cast('float32');
+        let scale = noOutFlow.add(hasOutFlow.mul(water).mul(dx2Bydt).div(tf.maximum(totalOutflow, 0.001)));
+        scale = tf.minimum(scale, 1);
 
-    const scaledByBottom = tf.less(flowY.slice([0,0], [M,N]), 0).cast('float32');
-    const scaledByTop = tf.greater(flowY.slice([0,1], [M,N]), 0).cast('float32');
-    const scaledYB = flowY.slice([0,0],[M,N]).mul(scaledByBottom).mul(scale);
-    const scaledYT = flowY.slice([0,1],[M,N]).mul(scaledByTop).mul(scale);
-    flowY = applyPatchTo2DTensor(flowY, scaledYB, 0, 0);
-    flowY = applyPatchTo2DTensor(flowY, tf.zeros([M,1]), 0, N);
-    flowY = applyPatchTo2DTensor(flowY, flowY.slice([0,1], [M,N]).add(scaledYT), 0, 1);
+        // --- Scale flows ---
+        const scaledByRight = tf.less(flowX.slice([0, 0], [M, N]), 0).cast('float32');
+        const scaledByLeft  = tf.greater(flowX.slice([1, 0], [M, N]), 0).cast('float32');
+        const scaledXL = flowX.slice([0, 0], [M, N]).mul(scaledByRight).mul(scale);
+        const scaledXR = flowX.slice([1, 0], [M, N]).mul(scaledByLeft).mul(scale);
 
-    let waterDelta = flowX.slice([0,0],[M,N]).add(flowY.slice([0,0],[M,M]))
-                     .sub(flowX.slice([1,0],[M,N])).sub(flowY.slice([0,1],[M,N]));
-    waterDelta = waterDelta.div(dx2Bydt);
-    water = water.add(waterDelta);
+        let tempFlowX = applyPatchTo2DTensor(flowX, scaledXL, 0, 0);
+        flowX.dispose();
+        flowX = tf.keep(tempFlowX);
 
-    applyPatchTo2DTensor(water, tf.zeros([1,N]), 0, 0);
-    applyPatchTo2DTensor(water, tf.zeros([1,N]), M-1, 0);
-    applyPatchTo2DTensor(water, tf.zeros([M,1]), 0, 0);
-    applyPatchTo2DTensor(water, tf.zeros([M,1]), 0, N-1);
+        tempFlowX = applyPatchTo2DTensor(flowX, tf.zeros([1, N]), M, 0);
+        flowX.dispose();
+        flowX = tf.keep(tempFlowX);
 
-    step++;
+        tempFlowX = applyPatchTo2DTensor(flowX, flowX.slice([1, 0], [M, N]).add(scaledXR), 1, 0);
+        flowX.dispose();
+        flowX = tf.keep(tempFlowX);
+
+        const scaledByBottom = tf.less(flowY.slice([0, 0], [M, N]), 0).cast('float32');
+        const scaledByTop    = tf.greater(flowY.slice([0, 1], [M, N]), 0).cast('float32');
+        const scaledYB = flowY.slice([0, 0], [M, N]).mul(scaledByBottom).mul(scale);
+        const scaledYT = flowY.slice([0, 1], [M, N]).mul(scaledByTop).mul(scale);
+
+        let tempFlowY = applyPatchTo2DTensor(flowY, scaledYB, 0, 0);
+        flowY.dispose();
+        flowY = tf.keep(tempFlowY);
+
+        tempFlowY = applyPatchTo2DTensor(flowY, tf.zeros([M, 1]), 0, N);
+        flowY.dispose();
+        flowY = tf.keep(tempFlowY);
+
+        tempFlowY = applyPatchTo2DTensor(flowY, flowY.slice([0, 1], [M, N]).add(scaledYT), 0, 1);
+        flowY.dispose();
+        flowY = tf.keep(tempFlowY);
+
+        // --- Water update ---
+        let waterDelta = flowX.slice([0, 0], [M, N])
+                        .add(flowY.slice([0, 0], [M, N]))
+                        .sub(flowX.slice([1, 0], [M, N]))
+                        .sub(flowY.slice([0, 1], [M, N]));
+        waterDelta = waterDelta.div(dx2Bydt);
+        const newWater2 = water.add(waterDelta);
+        water.dispose();
+        water = tf.keep(newWater2);
+
+        // --- Boundary cleanup ---
+        let tempWater = applyPatchTo2DTensor(water, tf.zeros([1, N]), 0, 0);
+        water.dispose();
+        water = tf.keep(tempWater);
+
+        tempWater = applyPatchTo2DTensor(water, tf.zeros([1, N]), M - 1, 0);
+        water.dispose();
+        water = tf.keep(tempWater);
+
+        tempWater = applyPatchTo2DTensor(water, tf.zeros([M, 1]), 0, 0);
+        water.dispose();
+        water = tf.keep(tempWater);
+
+        tempWater = applyPatchTo2DTensor(water, tf.zeros([M, 1]), 0, N - 1);
+        water.dispose();
+        water = tf.keep(tempWater);
+
+        // Step counter
+        step++;
+    });
 }
 
 function drawWater()
@@ -241,14 +290,4 @@ function animate() {
 
   controls.update();
   renderer.render(scene, camera);
-
-//   // Define two 512x512 matrices with random values
-//     const a = tf.randomUniform([128, 128]);
-//     const b = tf.randomUniform([128, 128]);
-
-//     // Matrix multiplication
-//     const c = tf.matMul(a, b);
-
-//     // Optionally print the result (just first few values)
-//     c.slice([4, 4], [1, 2]).print();
 }
