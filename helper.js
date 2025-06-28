@@ -46,8 +46,8 @@ export function makeArray(dx, dy)
     return arr;
 }
 
-export async function loadTerrain(fpath) {
-
+export async function loadTerrain(fname) {
+  const fpath = "../data/" + fname + ".txt";
   const res = await fetch(fpath);
   const text = await res.text();
   

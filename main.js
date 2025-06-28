@@ -17,7 +17,10 @@ let M = 0;
 let N = 0;
 let terrainData = [];
 
-let loadTerrainResult = await loadTerrain("./data/channel_32.txt");
+const terrainList = ["channel_17", "channel_32", "sink"];
+let terrainIndex = 0;
+
+let loadTerrainResult = await loadTerrain(terrainList[terrainIndex]);
 initTensors(loadTerrainResult);
 
 const scene = new THREE.Scene();
@@ -28,7 +31,7 @@ document.body.appendChild(renderer.domElement);
 renderer.setAnimationLoop( animate );
 
 const camera = new THREE.PerspectiveCamera(75, window.innerWidth / window.innerHeight, 0.1, 1000);
-    camera.position.set(10, 15, 10);
+camera.position.set(0, 20, 30);
 const controls = new OrbitControls(camera, renderer.domElement);
 controls.enableDamping = true;
 
@@ -113,7 +116,7 @@ let waterMesh = setupScene();
 const epsilon = 0.001;
 const dx = tf.scalar(1);
 const dt = tf.scalar(0.1);
-const sourceRate = tf.scalar(0.2);
+const sourceRate = tf.scalar(0.5);
 const g = tf.scalar(0.1);
 const dx2Bydt = dx.mul(dx).div(dt);
 
@@ -271,12 +274,12 @@ function makePanel() {
 		contentDirection: 'row-reverse',
 		fontFamily: FontJSON,
 		fontTexture: FontImage,
-		fontSize: 0.7,
-		padding: 0.02,
-		borderRadius: 0.11
+		fontSize: 1.4,
+		padding: 0.2,
+		borderRadius: 1.1
 	} );
 
-	container.position.set( 0, 8.6, 0 );
+	container.position.set( 0, 11, 0 );
 	container.rotation.x = -0.55;
 	scene.add( container );
 
@@ -286,8 +289,8 @@ function makePanel() {
 	// in order to write less code.
 
 	const buttonOptions = {
-		width: 5.0,
-		height: 1.0,
+		width: 10.0,
+		height: 2.0,
 		justifyContent: 'center',
 		offset: 0.05,
 		margin: 0.02,
@@ -319,17 +322,15 @@ function makePanel() {
 
 	// Buttons creation, with the options objects passed in parameters.
 
-	const buttonNext = new ThreeMeshUI.Block( buttonOptions );
+	const switchMapBtn = new ThreeMeshUI.Block( buttonOptions );
 	const buttonPrevious = new ThreeMeshUI.Block( buttonOptions );
 
 	// Add text to buttons
-
-	buttonNext.add(
-		new ThreeMeshUI.Text( { content: 'next' } )
-	);
+    const switchMapText = new ThreeMeshUI.Text( { content: "- " + terrainList[terrainIndex] + " +" } );
+	switchMapBtn.add(switchMapText);
 
 	buttonPrevious.add(
-		new ThreeMeshUI.Text( { content: 'previous' } )
+		new ThreeMeshUI.Text( { content: '- water +' } )
 	);
 
 	// Create states for the buttons.
@@ -341,16 +342,19 @@ function makePanel() {
 		fontColor: new THREE.Color( 0x222222 )
 	};
 
-	buttonNext.setupState( {
+	switchMapBtn.setupState( {
 		state: 'selected',
 		attributes: selectedAttributes,
-		onSet: () => {
+		onSet: async () => {
+            terrainIndex = (terrainIndex + 1) % terrainList.length;
+            loadTerrainResult = await loadTerrain(terrainList[terrainIndex]);
+            switchMapText.set({ content: "- " + terrainList[terrainIndex] + " +"});
             initTensors(loadTerrainResult);
             waterMesh = setupScene();
 		}
 	} );
-	buttonNext.setupState( hoveredStateAttributes );
-	buttonNext.setupState( idleStateAttributes );
+	switchMapBtn.setupState( hoveredStateAttributes );
+	switchMapBtn.setupState( idleStateAttributes );
 
 	buttonPrevious.setupState( {
 		state: 'selected',
@@ -363,8 +367,8 @@ function makePanel() {
 	buttonPrevious.setupState( hoveredStateAttributes );
 	buttonPrevious.setupState( idleStateAttributes );
 
-	container.add( buttonNext, buttonPrevious );
-	objsToRayCast.push( buttonNext, buttonPrevious );
+	container.add( switchMapBtn, buttonPrevious );
+	objsToRayCast.push( switchMapBtn, buttonPrevious );
 
 }
 
