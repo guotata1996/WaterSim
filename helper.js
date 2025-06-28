@@ -110,5 +110,5 @@ export async function loadTerrain(fpath) {
       }
   }
 
-  return [terrainData, waterData, sourceData]
+  return [terrainData, waterData, sourceData];
 }

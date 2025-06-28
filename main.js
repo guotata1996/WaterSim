@@ -7,46 +7,80 @@ import FontImage from './assets/Roboto-msdf.png';
 import * as tf from '@tensorflow/tfjs';
 import { applyPatchTo2DTensor, makeArray, loadTerrain } from './helper.js';
 
-const [terrainData, waterData, sourceData] = await loadTerrain("./data/channel_32.txt");
-const M = terrainData.length;
-const N = terrainData[0].length;
+let terrain = tf.tensor([]);
+let water = tf.tensor([]);
+let source = tf.tensor([]);
+let flowX = tf.tensor([]);
+let flowY = tf.tensor([]); 
+let step = 0;
+let M = 0;
+let N = 0;
+let terrainData = [];
 
-const terrain = tf.tensor(terrainData);
-let water = tf.tensor(waterData);
-const source = tf.tensor(sourceData);
+let loadTerrainResult = await loadTerrain("./data/channel_32.txt");
+initTensors(loadTerrainResult);
 
 const scene = new THREE.Scene();
-const camera = new THREE.PerspectiveCamera(75, window.innerWidth / window.innerHeight, 0.1, 1000);
-camera.position.set(10, 15, 10);
-const light = new THREE.HemisphereLight(0xB1E1FF, 0xB97A20, 5);
-scene.add(light);
 
 const renderer = new THREE.WebGLRenderer({ antialias: true });
 renderer.setSize(window.innerWidth, window.innerHeight);
 document.body.appendChild(renderer.domElement);
 renderer.setAnimationLoop( animate );
 
+const camera = new THREE.PerspectiveCamera(75, window.innerWidth / window.innerHeight, 0.1, 1000);
+    camera.position.set(10, 15, 10);
 const controls = new OrbitControls(camera, renderer.domElement);
 controls.enableDamping = true;
 
-const geometry = new THREE.BoxGeometry();
-const terrainMaterial = new THREE.MeshPhongMaterial({
-    color: 0x8f563b
-});
+const light = new THREE.HemisphereLight(0xB1E1FF, 0xB97A20, 5);
+scene.add(light);
 
-let terrainMesh = new THREE.InstancedMesh( geometry, terrainMaterial, M * N );
-terrainMesh.instanceMatrix.setUsage( THREE.StaticDrawUsage ); 
-scene.add( terrainMesh );
+window.addEventListener('resize', () => {
+    camera.aspect = window.innerWidth / window.innerHeight;
+    camera.updateProjectionMatrix();
+    renderer.setSize(window.innerWidth, window.innerHeight);
+  });
 
-const waterMaterial = new THREE.MeshPhongMaterial({
-    color: 0x1e90ff
-});
-let waterMesh = new THREE.InstancedMesh(geometry, waterMaterial, M * N);
-waterMesh.instanceMatrix.setUsage( THREE.DynamicDrawUsage ); // will be updated every frame
-scene.add( waterMesh );
-
-function drawTerrain()
+function initTensors(loadTerrainResult)
 {
+    terrain.dispose();
+    water.dispose();
+    source.dispose();
+    flowX.dispose();
+    flowY.dispose();
+    step = 0;
+
+    let [_terrainData, waterData, sourceData] = loadTerrainResult;
+    terrainData = _terrainData;
+    M = terrainData.length;
+    N = terrainData[0].length;
+
+    terrain = tf.tensor(terrainData);
+    water = tf.tensor(waterData);
+    source = tf.tensor(sourceData);
+
+    flowX = tf.tensor(makeArray(M+1, N));
+    flowY = tf.tensor(makeArray(M, N+1));
+}
+
+const mapObjects = []
+
+function setupScene()
+{
+    mapObjects.forEach(( obj ) => { scene.remove(obj);});
+    while(mapObjects.length > 0) {
+        mapObjects.pop();
+    }
+
+    const geometry = new THREE.BoxGeometry();
+    const terrainMaterial = new THREE.MeshPhongMaterial({
+        color: 0x8f563b
+    });
+
+    let terrainMesh = new THREE.InstancedMesh( geometry, terrainMaterial, M * N );
+    terrainMesh.instanceMatrix.setUsage( THREE.StaticDrawUsage ); 
+    scene.add( terrainMesh );
+
     const dummy = new THREE.Object3D();
     let i = 0;
     for ( let x = 0; x < M; x ++ ) 
@@ -62,24 +96,25 @@ function drawTerrain()
         }
     }
     terrainMesh.instanceMatrix.needsUpdate = true;
-}
-drawTerrain();
 
-window.addEventListener('resize', () => {
-  camera.aspect = window.innerWidth / window.innerHeight;
-  camera.updateProjectionMatrix();
-  renderer.setSize(window.innerWidth, window.innerHeight);
-});
+    const waterMaterial = new THREE.MeshPhongMaterial({
+        color: 0x1e90ff
+    });
+    let waterMesh = new THREE.InstancedMesh(geometry, waterMaterial, M * N);
+    waterMesh.instanceMatrix.setUsage( THREE.DynamicDrawUsage ); // will be updated every frame
+    scene.add( waterMesh );
+
+    mapObjects.push(terrainMesh, waterMesh);
+    return waterMesh;
+}
+
+let waterMesh = setupScene();
 
 const epsilon = 0.001;
-let step = 0;
-let flowX = tf.tensor(makeArray(M+1, N));
-let flowY = tf.tensor(makeArray(M, N+1));
 const dx = tf.scalar(1);
 const dt = tf.scalar(0.1);
 const sourceRate = tf.scalar(0.2);
 const g = tf.scalar(0.1);
-
 const dx2Bydt = dx.mul(dx).div(dt);
 
 function simulate()
@@ -220,9 +255,12 @@ function drawWater()
 ///////////////////
 // UI contruction
 ///////////////////
-const objsToTest = [];
+const objsToRayCast = [];
 
 function makePanel() {
+    while(objsToRayCast.length > 0) {
+        objsToRayCast.pop();
+    }
 
 	// Container block, in which we put the two buttons.
 	// We don't define width and height, it will be set automatically from the children's dimensions
@@ -307,14 +345,12 @@ function makePanel() {
 		state: 'selected',
 		attributes: selectedAttributes,
 		onSet: () => {
-
-			console.log("Btn Next");
+            initTensors(loadTerrainResult);
+            waterMesh = setupScene();
 		}
 	} );
 	buttonNext.setupState( hoveredStateAttributes );
 	buttonNext.setupState( idleStateAttributes );
-
-	//
 
 	buttonPrevious.setupState( {
 		state: 'selected',
@@ -327,10 +363,8 @@ function makePanel() {
 	buttonPrevious.setupState( hoveredStateAttributes );
 	buttonPrevious.setupState( idleStateAttributes );
 
-	//
-
 	container.add( buttonNext, buttonPrevious );
-	objsToTest.push( buttonNext, buttonPrevious );
+	objsToRayCast.push( buttonNext, buttonPrevious );
 
 }
 
@@ -369,7 +403,7 @@ window.addEventListener( 'touchend', () => {
 
 function raycast() {
 
-	return objsToTest.reduce( ( closestIntersection, obj ) => {
+	return objsToRayCast.reduce( ( closestIntersection, obj ) => {
 
 		const intersection = raycaster.intersectObject( obj, true );
 
@@ -432,7 +466,7 @@ function updateButtons() {
 
     // Update non-targeted buttons state
 
-	objsToTest.forEach( ( obj ) => {
+	objsToRayCast.forEach( ( obj ) => {
 
 		if ( ( !intersect || obj !== intersect.object ) && obj.isUI ) {
 
