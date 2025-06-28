@@ -1,81 +1,15 @@
 import * as THREE from 'three';
 import { OrbitControls } from 'three/examples/jsm/controls/OrbitControls.js';
+import ThreeMeshUI from 'three-mesh-ui';
+import FontJSON from './assets/Roboto-msdf.json';
+import FontImage from './assets/Roboto-msdf.png';
 
 import * as tf from '@tensorflow/tfjs';
-import { applyPatchTo2DTensor } from './helper.js';
+import { applyPatchTo2DTensor, makeArray, loadTerrain } from './helper.js';
 
-
-const res = await fetch('./data/channel_32.txt');
-const text = await res.text();
-
-const lines = text.trim().split('\n');
-
-let xmin = 9999, ymin = 9999, zmin = 9999;
-let xmax = -9999, ymax = -9999, zmax = -9999;
-
-let parsed_lines = [];
-
-for (const line of lines)
-{
-    if (line.startsWith('#'))
-    {
-        continue;
-    }
-    const [xStr, yStr, zStr, color] = line.trim().split(/\s+/);
-    const x = parseInt(xStr, 10);
-    const y = parseInt(yStr, 10);
-    const z = parseInt(zStr, 10);
-
-    parsed_lines.push([x,y,z,color]);
-    
-    if (color === '000000'){
-        // 000000 determines base size
-        xmin = Math.min(xmin, x)
-        ymin = Math.min(ymin, y)
-        zmin = Math.min(zmin, z)
-        xmax = Math.max(xmax, x)
-        ymax = Math.max(ymax, y)
-        zmax = Math.max(zmax, z)
-    }
-}
-
-let M = xmax - xmin + 1;
-let N = ymax - ymin + 1;
-
-function makeArray(dx, dy)
-{
-    const arr = new Array(dx);
-    for (let i = 0; i < dx; ++i)
-    {
-        arr[i] = new Array(dy).fill(0);
-    }
-    return arr;
-}
-
-const terrainData = makeArray(M, N);
-for (const parsed of parsed_lines)
-{
-    const [x, y, z, color] = parsed;
-    if (color == '8f563b')
-    {
-        terrainData[x - xmin][y - ymin] = Math.max(terrainData[x - xmin][y - ymin], z - zmax);
-    }
-}
-
-const waterData = makeArray(M, N);
-const sourceData = makeArray(M, N);
-for (const parsed of parsed_lines)
-{
-    const [x, y, z, color] = parsed;
-    if (color == '639bff' || color == 'fbf236')
-    {
-        waterData[x - xmin][y - ymin] = Math.max(waterData[x - xmin][y - ymin], z - terrainData[x - xmin][y - ymin]);
-    }
-    if (color == 'fbf236')
-    {
-        sourceData[x - xmin][y - ymin] += 1
-    }
-}
+const [terrainData, waterData, sourceData] = await loadTerrain("./data/channel_32.txt");
+const M = terrainData.length;
+const N = terrainData[0].length;
 
 const terrain = tf.tensor(terrainData);
 let water = tf.tensor(waterData);
@@ -248,10 +182,9 @@ function simulate()
         tempWater = applyPatchTo2DTensor(water, tf.zeros([M, 1]), 0, N - 1);
         water.dispose();
         water = tf.keep(tempWater);
-
-        // Step counter
-        step++;
     });
+    // Step counter
+    step++;
 }
 
 function drawWater()
@@ -284,10 +217,245 @@ function drawWater()
     waterMesh.instanceMatrix.needsUpdate = true;
 }
 
-function animate() {
-  simulate();
-  drawWater();
+///////////////////
+// UI contruction
+///////////////////
+const objsToTest = [];
 
-  controls.update();
-  renderer.render(scene, camera);
+function makePanel() {
+
+	// Container block, in which we put the two buttons.
+	// We don't define width and height, it will be set automatically from the children's dimensions
+	// Note that we set contentDirection: "row-reverse", in order to orient the buttons horizontally
+
+	const container = new ThreeMeshUI.Block( {
+		justifyContent: 'center',
+		contentDirection: 'row-reverse',
+		fontFamily: FontJSON,
+		fontTexture: FontImage,
+		fontSize: 0.7,
+		padding: 0.02,
+		borderRadius: 0.11
+	} );
+
+	container.position.set( 0, 8.6, 0 );
+	container.rotation.x = -0.55;
+	scene.add( container );
+
+	// BUTTONS
+
+	// We start by creating objects containing options that we will use with the two buttons,
+	// in order to write less code.
+
+	const buttonOptions = {
+		width: 5.0,
+		height: 1.0,
+		justifyContent: 'center',
+		offset: 0.05,
+		margin: 0.02,
+		borderRadius: 0.075
+	};
+
+	// Options for component.setupState().
+	// It must contain a 'state' parameter, which you will refer to with component.setState( 'name-of-the-state' ).
+
+	const hoveredStateAttributes = {
+		state: 'hovered',
+		attributes: {
+			offset: 0.035,
+			backgroundColor: new THREE.Color( 0x999999 ),
+			backgroundOpacity: 1,
+			fontColor: new THREE.Color( 0xffffff )
+		},
+	};
+
+	const idleStateAttributes = {
+		state: 'idle',
+		attributes: {
+			offset: 0.035,
+			backgroundColor: new THREE.Color( 0x666666 ),
+			backgroundOpacity: 0.3,
+			fontColor: new THREE.Color( 0xffffff )
+		},
+	};
+
+	// Buttons creation, with the options objects passed in parameters.
+
+	const buttonNext = new ThreeMeshUI.Block( buttonOptions );
+	const buttonPrevious = new ThreeMeshUI.Block( buttonOptions );
+
+	// Add text to buttons
+
+	buttonNext.add(
+		new ThreeMeshUI.Text( { content: 'next' } )
+	);
+
+	buttonPrevious.add(
+		new ThreeMeshUI.Text( { content: 'previous' } )
+	);
+
+	// Create states for the buttons.
+	// In the loop, we will call component.setState( 'state-name' ) when mouse hover or click
+
+	const selectedAttributes = {
+		offset: 0.02,
+		backgroundColor: new THREE.Color( 0x777777 ),
+		fontColor: new THREE.Color( 0x222222 )
+	};
+
+	buttonNext.setupState( {
+		state: 'selected',
+		attributes: selectedAttributes,
+		onSet: () => {
+
+			console.log("Btn Next");
+		}
+	} );
+	buttonNext.setupState( hoveredStateAttributes );
+	buttonNext.setupState( idleStateAttributes );
+
+	//
+
+	buttonPrevious.setupState( {
+		state: 'selected',
+		attributes: selectedAttributes,
+		onSet: () => {
+            console.log("Btn Prev");
+
+		}
+	} );
+	buttonPrevious.setupState( hoveredStateAttributes );
+	buttonPrevious.setupState( idleStateAttributes );
+
+	//
+
+	container.add( buttonNext, buttonPrevious );
+	objsToTest.push( buttonNext, buttonPrevious );
+
 }
+
+makePanel();
+
+const raycaster = new THREE.Raycaster();
+const mouse = new THREE.Vector2();
+mouse.x = mouse.y = null;
+
+let selectState = false;
+
+window.addEventListener( 'pointermove', ( event ) => {
+	mouse.x = ( event.clientX / window.innerWidth ) * 2 - 1;
+	mouse.y = -( event.clientY / window.innerHeight ) * 2 + 1;
+} );
+
+window.addEventListener( 'pointerdown', () => {
+	selectState = true;
+} );
+
+window.addEventListener( 'pointerup', () => {
+	selectState = false;
+} );
+
+window.addEventListener( 'touchstart', ( event ) => {
+	selectState = true;
+	mouse.x = ( event.touches[ 0 ].clientX / window.innerWidth ) * 2 - 1;
+	mouse.y = -( event.touches[ 0 ].clientY / window.innerHeight ) * 2 + 1;
+} );
+
+window.addEventListener( 'touchend', () => {
+	selectState = false;
+	mouse.x = null;
+	mouse.y = null;
+} );
+
+function raycast() {
+
+	return objsToTest.reduce( ( closestIntersection, obj ) => {
+
+		const intersection = raycaster.intersectObject( obj, true );
+
+		if ( !intersection[ 0 ] ) return closestIntersection;
+
+		if ( !closestIntersection || intersection[ 0 ].distance < closestIntersection.distance ) {
+
+			intersection[ 0 ].object = obj;
+
+			return intersection[ 0 ];
+
+		}
+
+		return closestIntersection;
+
+	}, null );
+
+}
+
+function updateButtons() {
+
+	// Find closest intersecting object
+
+	let intersect;
+
+	if ( renderer.xr.isPresenting ) {
+
+		vrControl.setFromController( 0, raycaster.ray );
+
+		intersect = raycast();
+
+		// Position the little white dot at the end of the controller pointing ray
+		if ( intersect ) vrControl.setPointerAt( 0, intersect.point );
+
+	} else if ( mouse.x !== null && mouse.y !== null ) {
+
+		raycaster.setFromCamera( mouse, camera );
+
+		intersect = raycast();
+
+	}
+
+	// Update targeted button state (if any)
+
+	if ( intersect && intersect.object.isUI ) {
+
+		if ( selectState ) {
+
+			// Component.setState internally call component.set with the options you defined in component.setupState
+			intersect.object.setState( 'selected' );
+
+		} else {
+
+			// Component.setState internally call component.set with the options you defined in component.setupState
+			intersect.object.setState( 'hovered' );
+
+		}
+
+	}
+
+    // Update non-targeted buttons state
+
+	objsToTest.forEach( ( obj ) => {
+
+		if ( ( !intersect || obj !== intersect.object ) && obj.isUI ) {
+
+			// Component.setState internally call component.set with the options you defined in component.setupState
+			obj.setState( 'idle' );
+
+		}
+
+	} );
+}
+///////////////
+/// Main Loop
+///////////////
+
+function animate() {
+    simulate();
+    if (step % 10 == 1)
+    {
+      drawWater();
+    }
+  
+    controls.update();
+    updateButtons();
+    ThreeMeshUI.update();
+    renderer.render(scene, camera);
+  }

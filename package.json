@@ -12,7 +12,8 @@
   "description": "",
   "dependencies": {
     "@tensorflow/tfjs": "^4.22.0",
-    "three": "^0.177.0"
+    "three": "^0.177.0",
+    "three-mesh-ui": "^6.5.4"
   },
   "devDependencies": {
     "vite": "^6.3.5"

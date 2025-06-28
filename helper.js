@@ -35,3 +35,80 @@ export function applyPatchTo2DTensor(tensor, patch, x, y) {
     return tf.concat([top, newMiddle, bottom], 0);
   });
 }
+
+export function makeArray(dx, dy)
+{
+    const arr = new Array(dx);
+    for (let i = 0; i < dx; ++i)
+    {
+        arr[i] = new Array(dy).fill(0);
+    }
+    return arr;
+}
+
+export async function loadTerrain(fpath) {
+
+  const res = await fetch(fpath);
+  const text = await res.text();
+  
+  const lines = text.trim().split('\n');
+  
+  let xmin = 9999, ymin = 9999, zmin = 9999;
+  let xmax = -9999, ymax = -9999, zmax = -9999;
+  
+  let parsed_lines = [];
+  
+  for (const line of lines)
+  {
+      if (line.startsWith('#'))
+      {
+          continue;
+      }
+      const [xStr, yStr, zStr, color] = line.trim().split(/\s+/);
+      const x = parseInt(xStr, 10);
+      const y = parseInt(yStr, 10);
+      const z = parseInt(zStr, 10);
+  
+      parsed_lines.push([x,y,z,color]);
+      
+      if (color === '000000'){
+          // 000000 determines base size
+          xmin = Math.min(xmin, x)
+          ymin = Math.min(ymin, y)
+          zmin = Math.min(zmin, z)
+          xmax = Math.max(xmax, x)
+          ymax = Math.max(ymax, y)
+          zmax = Math.max(zmax, z)
+      }
+  }
+  
+  let M = xmax - xmin + 1;
+  let N = ymax - ymin + 1;
+  
+  const terrainData = makeArray(M, N);
+  for (const parsed of parsed_lines)
+  {
+      const [x, y, z, color] = parsed;
+      if (color == '8f563b')
+      {
+          terrainData[x - xmin][y - ymin] = Math.max(terrainData[x - xmin][y - ymin], z - zmax);
+      }
+  }
+  
+  const waterData = makeArray(M, N);
+  const sourceData = makeArray(M, N);
+  for (const parsed of parsed_lines)
+  {
+      const [x, y, z, color] = parsed;
+      if (color == '639bff' || color == 'fbf236')
+      {
+          waterData[x - xmin][y - ymin] = Math.max(waterData[x - xmin][y - ymin], z - terrainData[x - xmin][y - ymin]);
+      }
+      if (color == 'fbf236')
+      {
+          sourceData[x - xmin][y - ymin] += 1
+      }
+  }
+
+  return [terrainData, waterData, sourceData]
+}
