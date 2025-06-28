@@ -16,13 +16,8 @@ class Simulator:
         self.M = terrain.shape[0] + 2
         self.N = terrain.shape[1] + 2
 
-        self.terrain = np.empty((self.M,self.N))
+        self.terrain = np.zeros((self.M,self.N))
         self.terrain[1:-1,1:-1] = terrain
-        self.terrain[0,:] = self.terrain[1,:]
-        self.terrain[-1,:] = self.terrain[-2,:]
-        self.terrain[:,0] = self.terrain[:,1]
-        self.terrain[:,-1] = self.terrain[:,-2]
-        self.terrain[0,0] = self.terrain[0,-1] = self.terrain[-1,0] = self.terrain[-1,-1] = -1
 
         self.water = np.zeros((self.M,self.N))  # m
         self.water[1:-1,1:-1] = water
@@ -53,7 +48,6 @@ class Simulator:
         coeff_const = (1 - (1 - frictionFactor) ** dt_mult) / frictionFactor
         self.flowx[1:-1] = self.flowx[1:-1] * ((1 - frictionFactor) ** dt_mult) + coeff_const * \
                            boost_x * ((self.water[:-1, :] + self.terrain[:-1:]) - (self.water[1:, :] + self.terrain[1:, :])) * g * dx
-
         # Equivalent to this iterative version
         # for _ in range(dt_mult):
         #     self.flowx[1:-1] = self.flowx[1:-1] * (1 - frictionFactor) + \
@@ -64,9 +58,13 @@ class Simulator:
         boost_y = np.maximum(boost_y1, boost_y2) / dx
         boost_y = np.minimum(1, boost_y)
         boost_y = np.exp(boost_y)
-        for _ in range(dt_mult):
-            self.flowy[:,1:-1] = self.flowy[:,1:-1] * (1 - frictionFactor) + \
-                                 boost_y * ((self.water[:,:-1] + self.terrain[:,:-1]) - (self.water[:,1:] + self.terrain[:,1:])) * g * dx
+
+        self.flowy[:,1:-1] = self.flowy[:,1:-1] * ((1 - frictionFactor) ** dt_mult) + coeff_const * \
+                           boost_y * ((self.water[:,:-1] + self.terrain[:,:-1]) - (self.water[:,1:] + self.terrain[:,1:])) * g * dx
+        # Equivalent to this iterative version
+        # for _ in range(dt_mult):
+        #     self.flowy[:,1:-1] = self.flowy[:,1:-1] * (1 - frictionFactor) + \
+        #                          boost_y * ((self.water[:,:-1] + self.terrain[:,:-1]) - (self.water[:,1:] + self.terrain[:,1:])) * g * dx
 
         # Overdraft mitigation
         total_outflow = np.maximum(0, -self.flowx[:-1]) + np.maximum(0, self.flowx[1:]) + \

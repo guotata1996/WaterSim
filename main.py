@@ -5,7 +5,7 @@ import numpy as np
 import time
 from water import Simulator
 
-simulation = Simulator(r'data\sink.txt')
+simulation = Simulator(r'data\channel_17.txt')
 STEP_SIZE = 100
 
 paused = True
