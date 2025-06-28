@@ -82,8 +82,8 @@ export async function loadTerrain(fname) {
       }
   }
   
-  let M = xmax - xmin + 1;
-  let N = ymax - ymin + 1;
+  let M = xmax - xmin + 1 + 2;
+  let N = ymax - ymin + 1 + 2;
   
   const terrainData = makeArray(M, N);
   for (const parsed of parsed_lines)
@@ -91,7 +91,7 @@ export async function loadTerrain(fname) {
       const [x, y, z, color] = parsed;
       if (color == '8f563b')
       {
-          terrainData[x - xmin][y - ymin] = Math.max(terrainData[x - xmin][y - ymin], z - zmax);
+          terrainData[x - xmin + 1][y - ymin + 1] = Math.max(terrainData[x - xmin + 1][y - ymin + 1], z - zmax);
       }
   }
   
@@ -102,11 +102,11 @@ export async function loadTerrain(fname) {
       const [x, y, z, color] = parsed;
       if (color == '639bff' || color == 'fbf236')
       {
-          waterData[x - xmin][y - ymin] = Math.max(waterData[x - xmin][y - ymin], z - terrainData[x - xmin][y - ymin]);
+          waterData[x - xmin + 1][y - ymin + 1] = Math.max(waterData[x - xmin + 1][y - ymin + 1], z - terrainData[x - xmin][y - ymin]);
       }
       if (color == 'fbf236')
       {
-          sourceData[x - xmin][y - ymin] += 1
+          sourceData[x - xmin + 1][y - ymin + 1] += 1
       }
   }
 

@@ -115,10 +115,15 @@ let waterMesh = setupScene();
 
 const epsilon = 0.001;
 const dx = tf.scalar(1);
-const dt = tf.scalar(0.1);
-const sourceRate = tf.scalar(0.5);
+const dt_base = tf.scalar(0.1);
+const dt_mult = 5;
+const sourceRate = tf.scalar(0.2);
 const g = tf.scalar(0.1);
+const friction = 0.1;
+
+const dt = tf.mul(dt_base, dt_mult);
 const dx2Bydt = dx.mul(dx).div(dt);
+const coeff_const = (1 - (1 - friction) ** dt_mult) / friction;
 
 function simulate()
 {
@@ -129,20 +134,40 @@ function simulate()
         water.dispose();
         water = tf.keep(newWater1);
 
-        // --- Flow change due to gravity ---
+        // --- Flow change due to gravity (X) ---
         const surface = tf.add(water, terrain);
+
+        const boost_x1 = tf.mul(tf.maximum(0, tf.neg(tf.sign(flowX.slice([1,0], [M-1,N])))),
+            tf.div(tf.neg(flowX.slice([2,0], [M-1,N])), tf.maximum(water.slice([1,0], [M-1,N]), epsilon)));
+        const boost_x2 = tf.mul(tf.maximum(0, tf.sign(flowX.slice([1,0], [M-1,N]))), 
+            tf.div(flowX.slice([0,0], [M-1,N]), tf.maximum(water.slice([0,0], [M-1,N]), epsilon)));
+        const boost_x = tf.exp(tf.minimum(1, tf.div(tf.maximum(boost_x1, boost_x2), dx)));
 
         let flowIncX = surface.slice([0, 0], [M - 1, N])
             .sub(surface.slice([1, 0], [M - 1, N]))
             .mul(g).mul(dx);
-        const newFlowX1 = applyPatchTo2DTensor(flowX, tf.add(flowX.slice([1, 0], [M - 1, N]), flowIncX), 1, 0);
+        const newFlowXCenter = tf.add(
+            tf.mul(flowX.slice([1, 0], [M - 1, N]), (1 - friction) ** dt_mult),
+            tf.mul(tf.mul(boost_x, coeff_const), flowIncX));
+        const newFlowX1 = applyPatchTo2DTensor(flowX, newFlowXCenter, 1, 0);
         flowX.dispose();
         flowX = tf.keep(newFlowX1);
+
+        // --- Flow change due to gravity (Y) ---
+        const boost_y1 = tf.mul(tf.maximum(0, tf.neg(tf.sign(flowY.slice([0,1], [M,N-1])))),
+            tf.div(tf.neg(flowY.slice([0,2], [M,N-1])), tf.maximum(water.slice([0,1], [M,N-1]), epsilon)));
+        const boost_y2 = tf.mul(tf.maximum(0, tf.sign(flowY.slice([0,1], [M,N-1]))),
+            tf.div(flowY.slice([0,0], [M,N-1]), tf.maximum(water.slice([0,0], [M,N-1]), epsilon)));
+        const boost_y = tf.exp(tf.minimum(1, tf.div(tf.maximum(boost_y1, boost_y2), dx)));
 
         let flowIncY = surface.slice([0, 0], [M, N - 1])
             .sub(surface.slice([0, 1], [M, N - 1]))
             .mul(g).mul(dx);
-        const newFlowY1 = applyPatchTo2DTensor(flowY, tf.add(flowY.slice([0, 1], [M, N - 1]), flowIncY), 0, 1);
+        const newFlowYCenter = tf.add(
+            tf.mul(flowY.slice([0, 1], [M, N - 1]), (1 - friction) ** dt_mult),
+            tf.mul(tf.mul(boost_y, coeff_const), flowIncY));
+
+        const newFlowY1 = applyPatchTo2DTensor(flowY, newFlowYCenter, 0, 1);
         flowY.dispose();
         flowY = tf.keep(newFlowY1);
 
@@ -253,6 +278,9 @@ function drawWater()
         }
     }
     waterMesh.instanceMatrix.needsUpdate = true;
+
+    // console.log(step);
+    // console.log(depthArray);
 }
 
 ///////////////////
@@ -486,11 +514,12 @@ function updateButtons() {
 ///////////////
 
 function animate() {
-    simulate();
-    if (step % 10 == 1)
+    const drawFreq = 10;
+    if (step % drawFreq == 0)
     {
-      drawWater();
+        drawWater();
     }
+    simulate();
   
     controls.update();
     updateButtons();
