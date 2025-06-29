@@ -47,7 +47,7 @@ export function makeArray(dx, dy)
 }
 
 export async function loadTerrain(fname) {
-  const fpath = "../data/" + fname + ".txt";
+  const fpath = "../WaterSim/" + fname + ".txt";
   const res = await fetch(fpath);
   const text = await res.text();
   
