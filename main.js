@@ -1,10 +1,10 @@
 import * as THREE from 'three';
-import { OrbitControls } from 'three/examples/jsm/controls/OrbitControls.js';
 import ThreeMeshUI from 'three-mesh-ui';
+import * as tf from '@tensorflow/tfjs';
+
 import FontJSON from './assets/Roboto-msdf.json';
 import FontImage from './assets/Roboto-msdf.png';
-
-import * as tf from '@tensorflow/tfjs';
+import { OrbitControls } from 'three/examples/jsm/controls/OrbitControls.js';
 import { applyPatchTo2DTensor, makeArray, loadTerrain } from './helper.js';
 
 let terrain = tf.tensor([]);
@@ -287,6 +287,8 @@ function drawWater()
 // UI contruction
 ///////////////////
 const objsToRayCast = [];
+let paused = false;
+const stepText = new ThreeMeshUI.Text( { content: "step: 0" } );
 
 function makePanel() {
     while(objsToRayCast.length > 0) {
@@ -351,15 +353,13 @@ function makePanel() {
 	// Buttons creation, with the options objects passed in parameters.
 
 	const switchMapBtn = new ThreeMeshUI.Block( buttonOptions );
-	const buttonPrevious = new ThreeMeshUI.Block( buttonOptions );
+	const pauseUnpauseBtn = new ThreeMeshUI.Block( buttonOptions );
 
 	// Add text to buttons
     const switchMapText = new ThreeMeshUI.Text( { content: "- " + terrainList[terrainIndex] + " +" } );
 	switchMapBtn.add(switchMapText);
 
-	buttonPrevious.add(
-		new ThreeMeshUI.Text( { content: '- water +' } )
-	);
+	pauseUnpauseBtn.add(stepText);
 
 	// Create states for the buttons.
 	// In the loop, we will call component.setState( 'state-name' ) when mouse hover or click
@@ -379,24 +379,25 @@ function makePanel() {
             switchMapText.set({ content: "- " + terrainList[terrainIndex] + " +"});
             initTensors(loadTerrainResult);
             waterMesh = setupScene();
+
+            paused = false;
 		}
 	} );
 	switchMapBtn.setupState( hoveredStateAttributes );
 	switchMapBtn.setupState( idleStateAttributes );
 
-	buttonPrevious.setupState( {
+	pauseUnpauseBtn.setupState( {
 		state: 'selected',
 		attributes: selectedAttributes,
 		onSet: () => {
-            console.log("Btn Prev");
-
+            paused = !paused;
 		}
 	} );
-	buttonPrevious.setupState( hoveredStateAttributes );
-	buttonPrevious.setupState( idleStateAttributes );
+	pauseUnpauseBtn.setupState( hoveredStateAttributes );
+	pauseUnpauseBtn.setupState( idleStateAttributes );
 
-	container.add( switchMapBtn, buttonPrevious );
-	objsToRayCast.push( switchMapBtn, buttonPrevious );
+	container.add( switchMapBtn, pauseUnpauseBtn );
+	objsToRayCast.push( switchMapBtn, pauseUnpauseBtn );
 
 }
 
@@ -508,6 +509,9 @@ function updateButtons() {
 		}
 
 	} );
+
+    // Update step counter
+    stepText.set({ content: "step: " + step});
 }
 ///////////////
 /// Main Loop
@@ -519,7 +523,10 @@ function animate() {
     {
         drawWater();
     }
-    simulate();
+    if (!paused)
+    {
+        simulate();
+    }
   
     controls.update();
     updateButtons();
