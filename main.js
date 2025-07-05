@@ -288,7 +288,7 @@ function drawWater()
 ///////////////////
 const objsToRayCast = [];
 let paused = false;
-const stepText = new ThreeMeshUI.Text( { content: "step: 0" } );
+//const stepText = new ThreeMeshUI.Text( { content: "step: 0" } );
 
 function makePanel() {
     while(objsToRayCast.length > 0) {
@@ -298,7 +298,7 @@ function makePanel() {
 	// Container block, in which we put the two buttons.
 	// We don't define width and height, it will be set automatically from the children's dimensions
 	// Note that we set contentDirection: "row-reverse", in order to orient the buttons horizontally
-
+    /*
 	const container = new ThreeMeshUI.Block( {
 		justifyContent: 'center',
 		contentDirection: 'row-reverse',
@@ -398,10 +398,29 @@ function makePanel() {
 
 	container.add( switchMapBtn, pauseUnpauseBtn );
 	objsToRayCast.push( switchMapBtn, pauseUnpauseBtn );
+    */
 
+    const pauseButton = document.getElementById("pause");
+    pauseButton.addEventListener("click", () => {
+            paused = !paused;
+            pauseButton.textContent = paused ? "Resume" : "Pause ";
+		});
+
+    const switchSceneButton = document.getElementById("switchScene");
+    switchSceneButton.addEventListener("click", async () => {
+            terrainIndex = (terrainIndex + 1) % terrainList.length;
+            loadTerrainResult = await loadTerrain(terrainList[terrainIndex]);
+            switchSceneButton.textContent = "- " + terrainList[terrainIndex] + " +";
+            initTensors(loadTerrainResult);
+            waterMesh = setupScene();
+
+            paused = false;
+		});
+    switchSceneButton.textContent = "- " + terrainList[0] + " +";
 }
 
 makePanel();
+const stepLabel = document.getElementById("stepLabel");
 
 const raycaster = new THREE.Raycaster();
 const mouse = new THREE.Vector2();
@@ -511,7 +530,7 @@ function updateButtons() {
 	} );
 
     // Update step counter
-    stepText.set({ content: "step: " + step});
+    stepLabel.textContent = "step " + step;
 }
 ///////////////
 /// Main Loop
