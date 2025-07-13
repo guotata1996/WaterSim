@@ -66,53 +66,120 @@ function initTensors(loadTerrainResult)
     flowY = tf.tensor(makeArray(M, N+1));
 }
 
-const mapObjects = []
+//======================
+//   Water Mesh
+//======================
 
-function setupScene()
-{
-    mapObjects.forEach(( obj ) => { scene.remove(obj);});
-    while(mapObjects.length > 0) {
-        mapObjects.pop();
-    }
+const waterGeo = new THREE.PlaneGeometry(M, N, M * 2 - 1, N * 2 - 1);
+waterGeo.rotateX(-Math.PI / 2); // make it horizontal (XZ plane)
 
-    const geometry = new THREE.BoxGeometry();
-    const terrainMaterial = new THREE.MeshPhongMaterial({
-        color: 0x8f563b
-    });
+const waterHeightData = water.dataSync(); // flatten (row-major)
+const waterHeightTexture = new THREE.DataTexture(
+    waterHeightData,
+    M,
+    N,
+    THREE.RedFormat,
+    THREE.FloatType
+);
 
-    let terrainMesh = new THREE.InstancedMesh( geometry, terrainMaterial, M * N );
-    terrainMesh.instanceMatrix.setUsage( THREE.StaticDrawUsage ); 
-    scene.add( terrainMesh );
+const terrainHeightData = terrain.dataSync();
+const terrainHeightTexture = new THREE.DataTexture(
+    terrainHeightData,
+    M,
+    N,
+    THREE.RedFormat,
+    THREE.FloatType
+);
+terrainHeightTexture.needsUpdate = true;
 
-    const dummy = new THREE.Object3D();
-    let i = 0;
-    for ( let x = 0; x < M; x ++ ) 
-    {
-        for (let z = 0; z < N; z ++)
-        {
-            let h = terrainData[x][z];
-            dummy.position.set( x, h / 2.0, z );
-            dummy.scale.set( 1, h, 1 );
-            dummy.updateMatrix();
-            terrainMesh.setMatrixAt( i, dummy.matrix );
-            i ++;
+const waterMaterial = new THREE.ShaderMaterial({
+    vertexShader: `
+        uniform sampler2D heightMap;
+        uniform sampler2D terrainMap;
+        
+        uniform int m;
+        uniform int n;
+
+        varying float waterDepth;
+        varying float xGrid, yGrid;
+
+        void main() {
+            // Sample height from texture
+            float height = texture2D(heightMap, uv).r;
+
+            int ix = int(round(float(2 * m - 1) * uv.x));
+            int iy = int(round(float(2 * n - 1) * uv.y));
+
+            vec3 displaced = vec3((ix + 1) / 2, height, (iy + 1) / 2);
+
+            // Displace vertex in Y
+            // vec3 displaced = position + normal * height * heightScale;
+
+            gl_Position = projectionMatrix * modelViewMatrix * vec4(displaced, 1.0);
+
+            waterDepth = height - texture2D(terrainMap, uv).r;
+            xGrid = float(ix / 2);
+            yGrid = float(iy / 2);
         }
-    }
-    terrainMesh.instanceMatrix.needsUpdate = true;
+    `,
+    fragmentShader:  `
+        varying float waterDepth;
+        varying float xGrid, yGrid;
 
-    const waterMaterial = new THREE.MeshPhongMaterial({
-        color: 0x1e90ff
-    });
-    let waterMesh = new THREE.InstancedMesh(geometry, waterMaterial, M * N);
-    waterMesh.instanceMatrix.setUsage( THREE.DynamicDrawUsage ); // will be updated every frame
-    scene.add( waterMesh );
+        void main() {
+            bool isVertical = abs(round(xGrid) - xGrid) + abs(round(yGrid) - yGrid) != 0.0;
+            if (isVertical || (waterDepth < 0.001))
+            {
+                gl_FragColor = vec4(0.2, 0.2, 0.2, 1.0);
+            }
+            else
+            {
+                gl_FragColor = vec4(0.61, 0.82, waterDepth, 1.0);
+            }
+        }
+    `,
+    uniforms: {
+        heightMap: { value: waterHeightTexture },
+        terrainMap: { value: terrainHeightTexture},
+        m: {value: M},
+        n: {value: N}
+    },
+    side: THREE.DoubleSide,
+    //wireframe: true // for debug
+});
 
-    mapObjects.push(terrainMesh, waterMesh);
-    return waterMesh;
-}
+const waterMesh = new THREE.Mesh(waterGeo, waterMaterial);
+scene.add(waterMesh);
+waterMesh.rotateY(-Math.PI / 2);
 
-let waterMesh = setupScene();
+//======================
+//   Terrain Mesh
+//======================
+// const terrainGeo = new THREE.PlaneGeometry(M, N, M * 3, N * 3);
+// terrainGeo.rotateX(-Math.PI / 2); // make it horizontal (XZ plane)
 
+// const terrainMaterial = waterMaterial.clone();
+// terrainMaterial.fragmentShader = `
+//         void main() {
+//             gl_FragColor = vec4(0.2, 0.2, 0.2, 1.0);
+//         }
+//     `
+// const terrainHeightData = tf.add(terrain, 0.001).dataSync();
+// const terrainHeightTexture = new THREE.DataTexture(
+//     terrainHeightData,
+//     M,
+//     N,
+//     THREE.RedFormat,
+//     THREE.FloatType
+// );
+// terrainMaterial.uniforms.heightMap = {value : terrainHeightTexture};
+// const terrainMesh = new THREE.Mesh(terrainGeo, terrainMaterial);
+// scene.add(terrainMesh);
+// terrainMesh.rotateY(-Math.PI / 2);
+
+//======================
+//   Simulation
+//======================
 const epsilon = 0.001;
 const dx = tf.scalar(1);
 const dt_base = tf.scalar(0.1);
@@ -252,32 +319,9 @@ function simulate()
 
 function drawWater()
 {
-    let depthArray = water.arraySync();
-
-    const dummy = new THREE.Object3D();
-    let i = 0;
-    for ( let x = 0; x < M; x ++ ) 
-    {
-        for (let z = 0; z < N; z ++)
-        {
-            let h = depthArray[x][z];
-            if (h < epsilon)
-            {
-                dummy.scale.set( 0, 0, 0 );
-            }
-            else
-            {
-                let _base = terrainData[x][z];
-                dummy.position.set( x, _base + h / 2.0, z );
-                dummy.scale.set( 1, h, 1 );
-            }
-            dummy.updateMatrix();
-            waterMesh.setMatrixAt( i, dummy.matrix );
-
-            i ++;
-        }
-    }
-    waterMesh.instanceMatrix.needsUpdate = true;
+    const height = tf.add(water, terrain);
+    waterHeightData.set(height.dataSync());
+    waterHeightTexture.needsUpdate = true;
 
     // console.log(step);
     // console.log(depthArray);
