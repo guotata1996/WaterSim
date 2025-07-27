@@ -17,7 +17,7 @@ let M = 0;
 let N = 0;
 let terrainData = [];
 
-const terrainList = ["channel_17", "channel_32", "sink"];
+const terrainList = [ "sink", "channel_17", "channel_32"];
 let terrainIndex = 0;
 
 let loadTerrainResult = await loadTerrain(terrainList[terrainIndex]);
@@ -28,7 +28,6 @@ const scene = new THREE.Scene();
 const renderer = new THREE.WebGLRenderer({ antialias: true });
 renderer.setSize(window.innerWidth, window.innerHeight);
 document.body.appendChild(renderer.domElement);
-renderer.setAnimationLoop( animate );
 
 const camera = new THREE.PerspectiveCamera(75, window.innerWidth / window.innerHeight, 0.1, 1000);
 camera.position.set(0, 20, 30);
@@ -67,17 +66,53 @@ function initTensors(loadTerrainResult)
 }
 
 //======================
-//   Water Mesh
+//   Mesh
 //======================
+function loadTexture(url) {
+    return new Promise((resolve, reject) => {
+        const loader = new THREE.TextureLoader();
+        loader.load(url, resolve, undefined, reject);
+    });
+}
 
-const waterGeo = new THREE.PlaneGeometry(M, N, M * 2 - 1, N * 2 - 1);
+const terrainTex = await loadTexture('tex_stone.png');
+terrainTex.wrapS = THREE.RepeatWrapping;
+terrainTex.wrapT = THREE.RepeatWrapping;
+terrainTex.repeat.set(4, 4);  // Repeats 4 times horizontally and vertically
+terrainTex.needsUpdate = true;
+
+const waterGeo = new THREE.PlaneGeometry(N, M, N * 2 - 1, M * 2 - 1);
 waterGeo.rotateX(-Math.PI / 2); // make it horizontal (XZ plane)
 
 const waterHeightData = water.dataSync(); // flatten (row-major)
 const waterHeightTexture = new THREE.DataTexture(
     waterHeightData,
-    M,
     N,
+    M,
+    THREE.RedFormat,
+    THREE.FloatType
+);
+
+const waterTex = await loadTexture('tex_water.jpg');
+waterTex.wrapS = THREE.RepeatWrapping;
+waterTex.wrapT = THREE.RepeatWrapping;
+waterTex.repeat.set(4, 4);
+waterTex.needsUpdate = true;
+
+const vxData = flowX.dataSync();
+const vxTexture = new THREE.DataTexture(
+    vxData,
+    N,
+    M + 1,
+    THREE.RedFormat,
+    THREE.FloatType
+);
+
+const vyData = flowY.dataSync();
+const vyTexture = new THREE.DataTexture(
+    vyData,
+    N + 1,
+    M,
     THREE.RedFormat,
     THREE.FloatType
 );
@@ -85,8 +120,8 @@ const waterHeightTexture = new THREE.DataTexture(
 const terrainHeightData = terrain.dataSync();
 const terrainHeightTexture = new THREE.DataTexture(
     terrainHeightData,
-    M,
     N,
+    M,
     THREE.RedFormat,
     THREE.FloatType
 );
@@ -103,38 +138,71 @@ const waterMaterial = new THREE.ShaderMaterial({
         varying float waterDepth;
         varying float xGrid, yGrid;
 
+        varying vec3 vertex_local;
+
         void main() {
             // Sample height from texture
             float height = texture2D(heightMap, uv).r;
 
-            int ix = int(round(float(2 * m - 1) * uv.x));
-            int iy = int(round(float(2 * n - 1) * uv.y));
+            int ix = int(round(float(2 * n - 1) * uv.x));
+            int iy = int(round(float(2 * m - 1) * uv.y));
 
             vec3 displaced = vec3((ix + 1) / 2, height, (iy + 1) / 2);
-
-            // Displace vertex in Y
-            // vec3 displaced = position + normal * height * heightScale;
 
             gl_Position = projectionMatrix * modelViewMatrix * vec4(displaced, 1.0);
 
             waterDepth = height - texture2D(terrainMap, uv).r;
             xGrid = float(ix / 2);
             yGrid = float(iy / 2);
+            vertex_local = displaced;
         }
     `,
     fragmentShader:  `
         varying float waterDepth;
         varying float xGrid, yGrid;
+        varying vec3 vertex_local;
+
+        uniform sampler2D terrainDiffuseMap;
+        uniform sampler2D waterDiffuseMap;
+
+        uniform sampler2D vxMap;
+        uniform sampler2D vyMap;
+        uniform int m;
+        uniform int n;
+        uniform float uTime;
 
         void main() {
-            bool isVertical = abs(round(xGrid) - xGrid) + abs(round(yGrid) - yGrid) != 0.0;
-            if (isVertical || (waterDepth < 0.001))
+            bool facingX = abs(round(xGrid) - xGrid) != 0.0;
+            bool facingY = abs(round(yGrid) - yGrid) != 0.0;
+            bool isVertical = facingX || facingY;
+
+            if (isVertical)
             {
+                // TODO: could be terrian or waterfall
                 gl_FragColor = vec4(0.2, 0.2, 0.2, 1.0);
+            }
+            else 
+            if (waterDepth < 0.001)
+            {
+                gl_FragColor = texture2D(terrainDiffuseMap, vertex_local.xz);
             }
             else
             {
-                gl_FragColor = vec4(0.61, 0.82, waterDepth, 1.0);
+                float fm = float(m);
+                float fn = float(n);
+                float vxSampleU = vertex_local.x / fn;
+                float vxSampleV = vertex_local.z / (fm + 1.0) + 0.5 / (fm + 1.0);
+
+                float vySampleU = vertex_local.x / (fn + 1.0) + 0.5 / (fn + 1.0);
+                float vySampleV = vertex_local.z / fm;
+
+                float vx = texture2D(vxMap, vec2(vxSampleU, vxSampleV)).r;
+                float vy = texture2D(vyMap, vec2(vySampleU, vySampleV)).r;
+                vec2 displacement = (uTime - floor(uTime)) * vec2(-vy, -vx) * 10.0;
+
+                vec4 color = texture2D(waterDiffuseMap, vertex_local.xz + displacement);
+                color.xy = color.xy * mix(1.0, 0.7, waterDepth);
+                gl_FragColor = color;
             }
         }
     `,
@@ -142,7 +210,12 @@ const waterMaterial = new THREE.ShaderMaterial({
         heightMap: { value: waterHeightTexture },
         terrainMap: { value: terrainHeightTexture},
         m: {value: M},
-        n: {value: N}
+        n: {value: N},
+        terrainDiffuseMap: {value: terrainTex},
+        waterDiffuseMap: {value: waterTex},
+        vxMap: {value: vxTexture},
+        vyMap: {value: vyTexture},
+        uTime: {value: 0.0}
     },
     side: THREE.DoubleSide,
     //wireframe: true // for debug
@@ -151,31 +224,6 @@ const waterMaterial = new THREE.ShaderMaterial({
 const waterMesh = new THREE.Mesh(waterGeo, waterMaterial);
 scene.add(waterMesh);
 waterMesh.rotateY(-Math.PI / 2);
-
-//======================
-//   Terrain Mesh
-//======================
-// const terrainGeo = new THREE.PlaneGeometry(M, N, M * 3, N * 3);
-// terrainGeo.rotateX(-Math.PI / 2); // make it horizontal (XZ plane)
-
-// const terrainMaterial = waterMaterial.clone();
-// terrainMaterial.fragmentShader = `
-//         void main() {
-//             gl_FragColor = vec4(0.2, 0.2, 0.2, 1.0);
-//         }
-//     `
-// const terrainHeightData = tf.add(terrain, 0.001).dataSync();
-// const terrainHeightTexture = new THREE.DataTexture(
-//     terrainHeightData,
-//     M,
-//     N,
-//     THREE.RedFormat,
-//     THREE.FloatType
-// );
-// terrainMaterial.uniforms.heightMap = {value : terrainHeightTexture};
-// const terrainMesh = new THREE.Mesh(terrainGeo, terrainMaterial);
-// scene.add(terrainMesh);
-// terrainMesh.rotateY(-Math.PI / 2);
 
 //======================
 //   Simulation
@@ -323,6 +371,10 @@ function drawWater()
     waterHeightData.set(height.dataSync());
     waterHeightTexture.needsUpdate = true;
 
+    vxData.set(flowX.dataSync()); // TODO: convert to V
+    vyData.set(flowY.dataSync());
+    vxTexture.needsUpdate = true;
+    vyTexture.needsUpdate = true;
     // console.log(step);
     // console.log(depthArray);
 }
@@ -579,7 +631,7 @@ function updateButtons() {
 ///////////////
 /// Main Loop
 ///////////////
-
+const clock = new THREE.Clock();
 function animate() {
     const drawFreq = 10;
     if (step % drawFreq == 0)
@@ -594,5 +646,9 @@ function animate() {
     controls.update();
     updateButtons();
     ThreeMeshUI.update();
+    const elapsedTime = clock.getElapsedTime();
+    waterMaterial.uniforms.uTime.value = elapsedTime;
     renderer.render(scene, camera);
   }
+
+renderer.setAnimationLoop( animate );
