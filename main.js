@@ -6,6 +6,7 @@ import FontJSON from './assets/Roboto-msdf.json';
 import FontImage from './assets/Roboto-msdf.png';
 import { OrbitControls } from 'three/examples/jsm/controls/OrbitControls.js';
 import { applyPatchTo2DTensor, makeArray, loadTerrain } from './helper.js';
+import { LoadMaterial } from './shader.js'
 
 let terrain = tf.tensor([]);
 let water = tf.tensor([]);
@@ -17,13 +18,26 @@ let M = 0;
 let N = 0;
 let terrainData = [];
 
+let waterGeo;
+let waterHeightData;
+let waterHeightTexture;
+let vxData;
+let vxTexture;
+let vyData;
+let vyTexture;
+let terrainHeightData;
+let terrainHeightTexture;
+let waterMesh = null;
+
 const terrainList = [ "sink", "channel_17", "channel_32"];
 let terrainIndex = 0;
 
 let loadTerrainResult = await loadTerrain(terrainList[terrainIndex]);
-initTensors(loadTerrainResult);
+initTensors();
 
 const scene = new THREE.Scene();
+const waterMaterial = await LoadMaterial();
+initMesh();
 
 const renderer = new THREE.WebGLRenderer({ antialias: true });
 renderer.setSize(window.innerWidth, window.innerHeight);
@@ -43,7 +57,7 @@ window.addEventListener('resize', () => {
     renderer.setSize(window.innerWidth, window.innerHeight);
   });
 
-function initTensors(loadTerrainResult)
+function initTensors()
 {
     terrain.dispose();
     water.dispose();
@@ -65,165 +79,70 @@ function initTensors(loadTerrainResult)
     flowY = tf.tensor(makeArray(M, N+1));
 }
 
+function initMesh()
+{
+    if (waterMesh != null)
+        scene.remove(waterMesh);
+    vxTexture?.dispose();
+    vyTexture?.dispose();
+    terrainHeightTexture?.dispose();
+
+    vxData = flowX.dataSync();
+    vxTexture = new THREE.DataTexture(
+        vxData,
+        N,
+        M + 1,
+        THREE.RedFormat,
+        THREE.FloatType
+    );
+
+    vyData = flowY.dataSync();
+    vyTexture = new THREE.DataTexture(
+        vyData,
+        N + 1,
+        M,
+        THREE.RedFormat,
+        THREE.FloatType
+    );
+
+    waterHeightData = water.dataSync(); // flatten (row-major)
+    waterHeightTexture = new THREE.DataTexture(
+        waterHeightData,
+        N,
+        M,
+        THREE.RedFormat,
+        THREE.FloatType
+    );
+
+    terrainHeightData = terrain.dataSync();
+    terrainHeightTexture = new THREE.DataTexture(
+        terrainHeightData,
+        N,
+        M,
+        THREE.RedFormat,
+        THREE.FloatType
+    );
+    terrainHeightTexture.needsUpdate = true;
+
+    waterGeo = new THREE.PlaneGeometry(N, M, N * 2 - 1, M * 2 - 1);
+    waterGeo.rotateX(-Math.PI / 2); // make it horizontal (XZ plane)
+
+    waterMaterial.uniforms.heightMap = {value: waterHeightTexture};
+    waterMaterial.uniforms.terrainMap = {value: terrainHeightTexture};
+    waterMaterial.uniforms.m = {value: M};
+    waterMaterial.uniforms.n = {value: N};
+    waterMaterial.uniforms.vxMap = {value: vxTexture};
+    waterMaterial.uniforms.vyMap = {value: vyTexture};
+
+    waterMesh = new THREE.Mesh(waterGeo, waterMaterial);
+    scene.add(waterMesh);
+    waterMesh.rotateY(-Math.PI / 2);
+}
+
 //======================
 //   Mesh
 //======================
-function loadTexture(url) {
-    return new Promise((resolve, reject) => {
-        const loader = new THREE.TextureLoader();
-        loader.load(url, resolve, undefined, reject);
-    });
-}
 
-const terrainTex = await loadTexture('tex_stone.png');
-terrainTex.wrapS = THREE.RepeatWrapping;
-terrainTex.wrapT = THREE.RepeatWrapping;
-terrainTex.repeat.set(4, 4);  // Repeats 4 times horizontally and vertically
-terrainTex.needsUpdate = true;
-
-const waterGeo = new THREE.PlaneGeometry(N, M, N * 2 - 1, M * 2 - 1);
-waterGeo.rotateX(-Math.PI / 2); // make it horizontal (XZ plane)
-
-const waterHeightData = water.dataSync(); // flatten (row-major)
-const waterHeightTexture = new THREE.DataTexture(
-    waterHeightData,
-    N,
-    M,
-    THREE.RedFormat,
-    THREE.FloatType
-);
-
-const waterTex = await loadTexture('tex_water.jpg');
-waterTex.wrapS = THREE.RepeatWrapping;
-waterTex.wrapT = THREE.RepeatWrapping;
-waterTex.repeat.set(4, 4);
-waterTex.needsUpdate = true;
-
-const vxData = flowX.dataSync();
-const vxTexture = new THREE.DataTexture(
-    vxData,
-    N,
-    M + 1,
-    THREE.RedFormat,
-    THREE.FloatType
-);
-
-const vyData = flowY.dataSync();
-const vyTexture = new THREE.DataTexture(
-    vyData,
-    N + 1,
-    M,
-    THREE.RedFormat,
-    THREE.FloatType
-);
-
-const terrainHeightData = terrain.dataSync();
-const terrainHeightTexture = new THREE.DataTexture(
-    terrainHeightData,
-    N,
-    M,
-    THREE.RedFormat,
-    THREE.FloatType
-);
-terrainHeightTexture.needsUpdate = true;
-
-const waterMaterial = new THREE.ShaderMaterial({
-    vertexShader: `
-        uniform sampler2D heightMap;
-        uniform sampler2D terrainMap;
-        
-        uniform int m;
-        uniform int n;
-
-        varying float waterDepth;
-        varying float xGrid, yGrid;
-
-        varying vec3 vertex_local;
-
-        void main() {
-            // Sample height from texture
-            float height = texture2D(heightMap, uv).r;
-
-            int ix = int(round(float(2 * n - 1) * uv.x));
-            int iy = int(round(float(2 * m - 1) * uv.y));
-
-            vec3 displaced = vec3((ix + 1) / 2, height, (iy + 1) / 2);
-
-            gl_Position = projectionMatrix * modelViewMatrix * vec4(displaced, 1.0);
-
-            waterDepth = height - texture2D(terrainMap, uv).r;
-            xGrid = float(ix / 2);
-            yGrid = float(iy / 2);
-            vertex_local = displaced;
-        }
-    `,
-    fragmentShader:  `
-        varying float waterDepth;
-        varying float xGrid, yGrid;
-        varying vec3 vertex_local;
-
-        uniform sampler2D terrainDiffuseMap;
-        uniform sampler2D waterDiffuseMap;
-
-        uniform sampler2D vxMap;
-        uniform sampler2D vyMap;
-        uniform int m;
-        uniform int n;
-        uniform float uTime;
-
-        void main() {
-            bool facingX = abs(round(xGrid) - xGrid) != 0.0;
-            bool facingY = abs(round(yGrid) - yGrid) != 0.0;
-            bool isVertical = facingX || facingY;
-
-            if (isVertical)
-            {
-                // TODO: could be terrian or waterfall
-                gl_FragColor = vec4(0.2, 0.2, 0.2, 1.0);
-            }
-            else 
-            if (waterDepth < 0.001)
-            {
-                gl_FragColor = texture2D(terrainDiffuseMap, vertex_local.xz);
-            }
-            else
-            {
-                float fm = float(m);
-                float fn = float(n);
-                float vxSampleU = vertex_local.x / fn;
-                float vxSampleV = vertex_local.z / (fm + 1.0) + 0.5 / (fm + 1.0);
-
-                float vySampleU = vertex_local.x / (fn + 1.0) + 0.5 / (fn + 1.0);
-                float vySampleV = vertex_local.z / fm;
-
-                float vx = texture2D(vxMap, vec2(vxSampleU, vxSampleV)).r;
-                float vy = texture2D(vyMap, vec2(vySampleU, vySampleV)).r;
-                vec2 displacement = (uTime - floor(uTime)) * vec2(-vy, -vx) * 10.0;
-
-                vec4 color = texture2D(waterDiffuseMap, vertex_local.xz + displacement);
-                color.xy = color.xy * mix(1.0, 0.7, waterDepth);
-                gl_FragColor = color;
-            }
-        }
-    `,
-    uniforms: {
-        heightMap: { value: waterHeightTexture },
-        terrainMap: { value: terrainHeightTexture},
-        m: {value: M},
-        n: {value: N},
-        terrainDiffuseMap: {value: terrainTex},
-        waterDiffuseMap: {value: waterTex},
-        vxMap: {value: vxTexture},
-        vyMap: {value: vyTexture},
-        uTime: {value: 0.0}
-    },
-    side: THREE.DoubleSide,
-    //wireframe: true // for debug
-});
-
-const waterMesh = new THREE.Mesh(waterGeo, waterMaterial);
-scene.add(waterMesh);
-waterMesh.rotateY(-Math.PI / 2);
 
 //======================
 //   Simulation
@@ -370,13 +289,22 @@ function drawWater()
     const height = tf.add(water, terrain);
     waterHeightData.set(height.dataSync());
     waterHeightTexture.needsUpdate = true;
+    const depthX = tf.maximum(
+        tf.maximum(tf.abs(tf.concat([tf.zeros([1, N]), water], 0)),
+                   tf.abs(tf.concat([water, tf.zeros([1, N])], 0))),
+        epsilon);
+    const vx = tf.div(flowX, depthX);
 
-    vxData.set(flowX.dataSync()); // TODO: convert to V
-    vyData.set(flowY.dataSync());
+    const depthY = tf.maximum(
+        tf.maximum(tf.abs(tf.concat([tf.zeros([M, 1]), water], 1)),
+                   tf.abs(tf.concat([water, tf.zeros([M, 1])], 1))),
+        epsilon);
+    const vy = tf.div(flowY, depthY);
+    
+    vxData.set(vx.dataSync());
+    vyData.set(vy.dataSync());
     vxTexture.needsUpdate = true;
     vyTexture.needsUpdate = true;
-    // console.log(step);
-    // console.log(depthArray);
 }
 
 ///////////////////
@@ -386,115 +314,10 @@ const objsToRayCast = [];
 let paused = false;
 //const stepText = new ThreeMeshUI.Text( { content: "step: 0" } );
 
-function makePanel() {
+function makeButtons() {
     while(objsToRayCast.length > 0) {
         objsToRayCast.pop();
     }
-
-	// Container block, in which we put the two buttons.
-	// We don't define width and height, it will be set automatically from the children's dimensions
-	// Note that we set contentDirection: "row-reverse", in order to orient the buttons horizontally
-    /*
-	const container = new ThreeMeshUI.Block( {
-		justifyContent: 'center',
-		contentDirection: 'row-reverse',
-		fontFamily: FontJSON,
-		fontTexture: FontImage,
-		fontSize: 1.4,
-		padding: 0.2,
-		borderRadius: 1.1
-	} );
-
-	container.position.set( 0, 11, 0 );
-	container.rotation.x = -0.55;
-	scene.add( container );
-
-	// BUTTONS
-
-	// We start by creating objects containing options that we will use with the two buttons,
-	// in order to write less code.
-
-	const buttonOptions = {
-		width: 10.0,
-		height: 2.0,
-		justifyContent: 'center',
-		offset: 0.05,
-		margin: 0.02,
-		borderRadius: 0.075
-	};
-
-	// Options for component.setupState().
-	// It must contain a 'state' parameter, which you will refer to with component.setState( 'name-of-the-state' ).
-
-	const hoveredStateAttributes = {
-		state: 'hovered',
-		attributes: {
-			offset: 0.035,
-			backgroundColor: new THREE.Color( 0x999999 ),
-			backgroundOpacity: 1,
-			fontColor: new THREE.Color( 0xffffff )
-		},
-	};
-
-	const idleStateAttributes = {
-		state: 'idle',
-		attributes: {
-			offset: 0.035,
-			backgroundColor: new THREE.Color( 0x666666 ),
-			backgroundOpacity: 0.3,
-			fontColor: new THREE.Color( 0xffffff )
-		},
-	};
-
-	// Buttons creation, with the options objects passed in parameters.
-
-	const switchMapBtn = new ThreeMeshUI.Block( buttonOptions );
-	const pauseUnpauseBtn = new ThreeMeshUI.Block( buttonOptions );
-
-	// Add text to buttons
-    const switchMapText = new ThreeMeshUI.Text( { content: "- " + terrainList[terrainIndex] + " +" } );
-	switchMapBtn.add(switchMapText);
-
-	pauseUnpauseBtn.add(stepText);
-
-	// Create states for the buttons.
-	// In the loop, we will call component.setState( 'state-name' ) when mouse hover or click
-
-	const selectedAttributes = {
-		offset: 0.02,
-		backgroundColor: new THREE.Color( 0x777777 ),
-		fontColor: new THREE.Color( 0x222222 )
-	};
-
-	switchMapBtn.setupState( {
-		state: 'selected',
-		attributes: selectedAttributes,
-		onSet: async () => {
-            terrainIndex = (terrainIndex + 1) % terrainList.length;
-            loadTerrainResult = await loadTerrain(terrainList[terrainIndex]);
-            switchMapText.set({ content: "- " + terrainList[terrainIndex] + " +"});
-            initTensors(loadTerrainResult);
-            waterMesh = setupScene();
-
-            paused = false;
-		}
-	} );
-	switchMapBtn.setupState( hoveredStateAttributes );
-	switchMapBtn.setupState( idleStateAttributes );
-
-	pauseUnpauseBtn.setupState( {
-		state: 'selected',
-		attributes: selectedAttributes,
-		onSet: () => {
-            paused = !paused;
-		}
-	} );
-	pauseUnpauseBtn.setupState( hoveredStateAttributes );
-	pauseUnpauseBtn.setupState( idleStateAttributes );
-
-	container.add( switchMapBtn, pauseUnpauseBtn );
-	objsToRayCast.push( switchMapBtn, pauseUnpauseBtn );
-    */
 
     const pauseButton = document.getElementById("pause");
     pauseButton.addEventListener("click", () => {
@@ -508,14 +331,14 @@ function makePanel() {
             loadTerrainResult = await loadTerrain(terrainList[terrainIndex]);
             switchSceneButton.textContent = "- " + terrainList[terrainIndex] + " +";
             initTensors(loadTerrainResult);
-            waterMesh = setupScene();
+            initMesh();
 
             paused = false;
 		});
     switchSceneButton.textContent = "- " + terrainList[0] + " +";
 }
 
-makePanel();
+makeButtons();
 const stepLabel = document.getElementById("stepLabel");
 
 const raycaster = new THREE.Raycaster();
