@@ -15,11 +15,17 @@ export async function LoadMaterial()
     terrainTex.repeat.set(4, 4);  // Repeats 4 times horizontally and vertically
     terrainTex.needsUpdate = true;
 
-    const waterTex = await loadTexture('tex_water.jpg');
+    const waterTex = await loadTexture('tex_water_1.jpg');
     waterTex.wrapS = THREE.RepeatWrapping;
     waterTex.wrapT = THREE.RepeatWrapping;
     waterTex.repeat.set(4, 4);
     waterTex.needsUpdate = true;
+
+    const waterTex2 = await loadTexture('tex_water_2.jpg');
+    waterTex2.wrapS = THREE.RepeatWrapping;
+    waterTex2.wrapT = THREE.RepeatWrapping;
+    waterTex2.repeat.set(4, 4);
+    waterTex2.needsUpdate = true;
 
     const waterMaterial = new THREE.ShaderMaterial({
         vertexShader: `
@@ -57,7 +63,8 @@ export async function LoadMaterial()
             varying vec3 vertex_local;
 
             uniform sampler2D terrainDiffuseMap;
-            uniform sampler2D waterDiffuseMap;
+            uniform sampler2D waterDiffuseMap1;
+            uniform sampler2D waterDiffuseMap2;
 
             uniform sampler2D vxMap;
             uniform sampler2D vyMap;
@@ -83,6 +90,21 @@ export async function LoadMaterial()
                 return texture2D(vyMap, vec2(u, v)).r;
             }
 
+            vec4 fadeWaterTextures(vec2 aUV, vec2 aVelocity)
+            {
+                const float HalfCycleTime = 1.0;
+                float t1 = uTime / (2.0 * HalfCycleTime);
+                float t2 = t1 + 0.5;
+                vec2 displacement1 = (t1 - floor(t1)) * aVelocity;
+                vec2 displacement2 = (t2 - floor(t2)) * aVelocity;
+                vec4 color1 = texture2D(waterDiffuseMap1, aUV + displacement1);
+                vec4 color2 = texture2D(waterDiffuseMap2, aUV + displacement2);
+
+                float tInCycle = t1 - floor(t1);
+                float weight1 = 2.0 * min(tInCycle, 1.0 - tInCycle);
+                return mix(color1, color2, 1.0 - weight1);
+            }
+
             void main() {
                 bool facingX = abs(round(xGrid) - xGrid) != 0.0;
                 bool facingY = abs(round(yGrid) - yGrid) != 0.0;
@@ -96,8 +118,8 @@ export async function LoadMaterial()
                         float vy = samplevyMap(vertex_local.x, vertex_local.z);
                         if (abs(vy) > 0.0)
                         {
-                            vec2 displacement = (uTime - floor(uTime)) * vec2(0.0, max(abs(vy), 1.0));
-                            gl_FragColor = texture2D(waterDiffuseMap, uv + displacement);
+                            //vec2 displacement = (uTime - floor(uTime)) * vec2(0.0, max(abs(vy), 1.0));
+                            gl_FragColor = fadeWaterTextures(uv, vec2(0.0, max(abs(vy), 1.0)));
                         }
                         else
                         {
@@ -110,8 +132,8 @@ export async function LoadMaterial()
                         float vx = samplevxMap(vertex_local.x, vertex_local.z);
                         if (abs(vx) > 0.0)
                         {
-                            vec2 displacement = (uTime - floor(uTime)) * vec2(0.0, max(abs(vx), 1.0));
-                            gl_FragColor = texture2D(waterDiffuseMap, uv + displacement);
+                            //vec2 displacement = (uTime - floor(uTime)) * vec2(0.0, max(abs(vx), 1.0));
+                            gl_FragColor = fadeWaterTextures(uv, vec2(0.0, max(abs(vx), 1.0)));
                         }
                         else
                         {
@@ -152,16 +174,16 @@ export async function LoadMaterial()
                         mix(vy00, vy01, vertex_local.z - vySampleVMinus),
                         mix(vy10, vy11, vertex_local.z - vySampleVMinus),
                         vertex_local.x - vySampleUMinus);
-                        
+
                     vec2 v = vec2(-vySmooth, -vxSmooth);
                     const float ClampV = 0.6;
                     if (length(v) > ClampV)
                     {
                         v = v / length(v) * ClampV;
                     }
-                    vec2 displacement = (uTime - floor(uTime)) * v;
+                    //vec2 displacement = (uTime - floor(uTime)) * v;
 
-                    vec4 color = texture2D(waterDiffuseMap, vertex_local.xz + displacement);
+                    vec4 color = fadeWaterTextures(vertex_local.xz, v);
                     color.xy = color.xy * mix(1.0, 0.7, waterDepth);
                     gl_FragColor = color;
                 }
@@ -169,7 +191,8 @@ export async function LoadMaterial()
         `,
         uniforms: {
             terrainDiffuseMap: {value: terrainTex},
-            waterDiffuseMap: {value: waterTex},
+            waterDiffuseMap1: {value: waterTex},
+            waterDiffuseMap2: {value: waterTex2},
             uTime: {value: 0.0}
         },
         side: THREE.DoubleSide,
