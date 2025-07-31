@@ -29,7 +29,7 @@ let terrainHeightData;
 let terrainHeightTexture;
 let waterMesh = null;
 
-const terrainList = [ "sink", "channel_17", "channel_32"];
+const terrainList = [ "sink", "symmetry", "room", "wave", "great_fall"];
 let terrainIndex = 0;
 
 let loadTerrainResult = await loadTerrain(terrainList[terrainIndex]);
@@ -153,7 +153,7 @@ const dt_base = tf.scalar(0.1);
 const dt_mult = 5;
 const sourceRate = tf.scalar(0.2);
 const g = tf.scalar(0.1);
-const friction = 0.1;
+const friction = 0.05;
 
 const dt = tf.mul(dt_base, dt_mult);
 const dx2Bydt = dx.mul(dx).div(dt);
@@ -334,6 +334,7 @@ function makeButtons() {
             initMesh();
 
             paused = false;
+            pauseButton.textContent = "Resume";
 		});
     switchSceneButton.textContent = "- " + terrainList[0] + " +";
 }
@@ -456,8 +457,8 @@ function updateButtons() {
 ///////////////
 const clock = new THREE.Clock();
 function animate() {
-    const drawFreq = 10;
-    if (step % drawFreq == 0)
+    const drawInterval = Math.min(Math.max(1, Math.trunc(M * N / 200)), 10);
+    if (step % drawInterval == 0)
     {
         drawWater();
     }

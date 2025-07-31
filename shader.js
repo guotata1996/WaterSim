@@ -47,7 +47,9 @@ export async function LoadMaterial()
                 int ix = int(round(float(2 * n - 1) * uv.x));
                 int iy = int(round(float(2 * m - 1) * uv.y));
 
-                vec3 displaced = vec3((ix + 1) / 2, height, (iy + 1) / 2);
+                int px = min(n-1, max(1, (ix + 1) / 2));
+                int py = min(m-1, max(1, (iy + 1) / 2));
+                vec3 displaced = vec3(px, height, py); // hide those quads on boundary
 
                 gl_Position = projectionMatrix * modelViewMatrix * vec4(displaced, 1.0);
 
@@ -118,8 +120,9 @@ export async function LoadMaterial()
                         float vy = samplevyMap(vertex_local.x, vertex_local.z);
                         if (abs(vy) > 0.0)
                         {
-                            //vec2 displacement = (uTime - floor(uTime)) * vec2(0.0, max(abs(vy), 1.0));
-                            gl_FragColor = fadeWaterTextures(uv, vec2(0.0, max(abs(vy), 1.0)));
+                            vec4 color = fadeWaterTextures(uv, vec2(0.0, max(abs(vy), 1.0)));
+                            color.xy = color.xy * mix(1.0, 0.7, waterDepth);
+                            gl_FragColor = color;
                         }
                         else
                         {
@@ -132,8 +135,9 @@ export async function LoadMaterial()
                         float vx = samplevxMap(vertex_local.x, vertex_local.z);
                         if (abs(vx) > 0.0)
                         {
-                            //vec2 displacement = (uTime - floor(uTime)) * vec2(0.0, max(abs(vx), 1.0));
-                            gl_FragColor = fadeWaterTextures(uv, vec2(0.0, max(abs(vx), 1.0)));
+                            vec4 color = fadeWaterTextures(uv, vec2(0.0, max(abs(vx), 1.0)));
+                            color.xy = color.xy * mix(1.0, 0.7, waterDepth);
+                            gl_FragColor = color;
                         }
                         else
                         {
@@ -176,12 +180,11 @@ export async function LoadMaterial()
                         vertex_local.x - vySampleUMinus);
 
                     vec2 v = vec2(-vySmooth, -vxSmooth);
-                    const float ClampV = 0.6;
+                    const float ClampV = 0.5;
                     if (length(v) > ClampV)
                     {
                         v = v / length(v) * ClampV;
                     }
-                    //vec2 displacement = (uTime - floor(uTime)) * v;
 
                     vec4 color = fadeWaterTextures(vertex_local.xz, v);
                     color.xy = color.xy * mix(1.0, 0.7, waterDepth);
